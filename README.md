@@ -36,23 +36,30 @@ No art: everything is drawn from plain shapes. The names and the look are our ow
   radius plus the block's half width (34 cm for the thinnest post) in a step; a dash covers 25 cm. A
   test fires darts at full dash into a near-immovable 24 cm post to check this.
 - **Winning.** Pop every pig. The score is everything broken, plus 10,000 for each bird left over.
-  Stars are against par, the fewest birds known to solve the level.
+  Stars come from the score. Three stars is the score of a typical win at par (the fewest birds
+  known to solve the level), taken from the solver's winning tries. Two stars is one bird's bonus
+  less, and any win is one star.
 
 Round things have a little rolling resistance, which the engine itself does not model. Without it, a
 pig on a plank tilted by a tenth of a degree rolls off in time.
 
-| # | Level | Idea | Birds | Par |
-|---|-------|------|-------|-----|
-| 1 | First Pig | one pig on a wooden table | 3 basic | 1 |
-| 2 | Glass House | ice: the house comes down on the pig inside | 3 basic | 1 |
-| 3 | Wood Fort | a two-storey fort, a pig on every floor | 3 basic | 1 |
-| 4 | Stone Wall | stone in front of a helmet pig: the heavy bird gets through | heavy + 2 basic | 1 |
-| 5 | Two Towers | two towers and a big pig between them | 4 basic | 2 |
-| 6 | Bunker | a big pig in concrete: only blasts reach it | 2 bombers + basic | 2 |
-| 7 | Ice Palace | three ice rooms: split the triple | 2 triples + basic | 1 |
-| 8 | Timber Yard | a wall of big wooden blocks: dash through it | 2 darts + basic | 2 |
-| 9 | Rooftops | pigs in stone huts: drop eggs on the roofs | 3 droppers | 2 |
-| 10 | Mixed Flock | stone, wood and ice in one fort, one bird for each | heavy, dart, triple, bomber | 2 |
+| # | Level | Idea | Birds | Par | 2 / 3 stars |
+|---|-------|------|-------|-----|-------------|
+| 1 | First Pig | one pig on a wooden table | 3 basic | 1 | 15000 / 25000 |
+| 2 | Glass House | ice: the house comes down on the pig inside | 3 basic | 1 | 21000 / 31000 |
+| 3 | Wood Fort | a two-storey fort, a pig on every floor | 3 basic | 1 | 27000 / 37000 |
+| 4 | Stone Wall | stone in front of a helmet pig: the heavy bird gets through | heavy + 2 basic | 1 | 24000 / 34000 |
+| 5 | Two Towers | two towers and a big pig between them | 4 basic | 2 | 36000 / 46000 |
+| 6 | Bunker | a big pig in concrete: only blasts reach it | 2 bombers + basic | 2 | 15000 / 25000 |
+| 7 | Ice Palace | three ice rooms: split the triple | 2 triples + basic | 1 | 37000 / 47000 |
+| 8 | Timber Yard | a wall of big wooden blocks: dash through it | 2 darts + basic | 2 | 16000 / 26000 |
+| 9 | Rooftops | pigs in stone huts: drop eggs on the roofs | 3 droppers | 2 | 15000 / 25000 |
+| 10 | Mixed Flock | stone, wood and ice in one fort, one bird for each | heavy, dart, triple, bomber | 2 | 40000 / 50000 |
+| 11 | Swing Set | a roofed fort only a wrecking ball can reach | heavy + 2 basic | 2 | 16000 / 26000 |
+| 12 | Windmill | a turning bar guards the way in: time the shot | dart, triple, basic | 2 | 12000 / 22000 |
+| 13 | Moving Day | the pigs' hut rides a gliding platform | 3 basic | 1 | 21000 / 31000 |
+| 14 | High Castle | a castle on a ledge, a material to each floor | heavy, dropper, triple, bomber | 2 | 40000 / 50000 |
+| 15 | Grand Finale | three towers, six pigs, five powers | dart, triple, bomber, heavy, dropper | 2 | 62000 / 72000 |
 
 ## Build and play
 
@@ -89,6 +96,9 @@ each bird being hardest on its own material. Every level is tested too:
   - Ice Palace: splitting the triple clears three rooms nearly four times as often as not splitting.
   - Timber Yard: a dashing dart breaks the wall three times as often as a basic bird.
   - Rooftops: an egg dropped over a hut pops its pig far more often than a bird thrown at it.
+  - Swing Set: on a one-degree grid, no shot touches the fort before the wrecking ball.
+  - Windmill and Moving Day: the bar turns at its speed and the deck follows its swing inside the
+    real level.
 
 Each test was checked by breaking the code it guards in a scratch copy and confirming the test fails.
 

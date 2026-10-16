@@ -79,8 +79,8 @@ int body_of_kind(const Level& g, Pig kind) {
 
 }  // namespace
 
-TEST(there_are_ten_levels_with_distinct_names) {
-    CHECK(level_count() == 10);
+TEST(there_are_fifteen_levels_with_distinct_names) {
+    CHECK(level_count() == 15);
     std::set<std::string> names;
     for (int i = 0; i < level_count(); ++i) {
         const Layout l = make_layout(i);
@@ -101,6 +101,7 @@ TEST(every_level_has_pigs_birds_and_a_par_it_can_afford) {
         CHECK(g.pigs_left == static_cast<int>(g.pigs.size()));
         CHECK(!l.ammo.empty());
         CHECK(l.par >= 1 && l.par <= static_cast<int>(l.ammo.size()));
+        CHECK(l.stars.two > 0 && l.stars.two < l.stars.three);
     }
 }
 
@@ -204,4 +205,71 @@ TEST(rooftops_an_egg_gets_into_a_hut_that_a_bird_cannot) {
     const int thrown = shots_that(l, Ammo::Dropper, first_hut), dropped = shots_that(l, Ammo::Dropper, first_hut, 10.9f);
     std::printf("    Rooftops: first hut's pig popped by %d shots thrown, %d with the egg dropped over it\n", thrown, dropped);
     CHECK(dropped >= 2 * thrown + 5);
+}
+
+TEST(windmills_turn_and_sliders_glide_inside_their_levels) {
+    // A bar that grinds against something in its own level, or a deck that sticks, would still pass
+    // the rule tests in test_level.cpp. The engine keeps angles in [-pi, pi], so turns are added up.
+    int checked = 0;
+    for (int i = 0; i < level_count(); ++i) {
+        const Layout l = make_layout(i);
+        if (l.hinges.empty() && l.sliders.empty()) continue;
+        Level g(l);
+        const size_t first_piece = 4 + l.walls.size();
+        std::vector<double> turned(g.world.bodies.size(), 0.0);
+        std::vector<Real> x0;
+        for (const Body& b : g.world.bodies) x0.push_back(b.pos.x);
+        for (int s = 0; s < 120 * 5; ++s) {
+            std::vector<Real> before;
+            for (const Body& b : g.world.bodies) before.push_back(b.angle);
+            g.step();
+            for (size_t b = 0; b < before.size(); ++b)
+                turned[b] += std::remainder(static_cast<double>(g.world.bodies[b].angle - before[b]), 2 * M_PI);
+        }
+        for (const Hinge& h : l.hinges) {
+            if (!h.motor) continue;
+            const size_t b = first_piece + static_cast<size_t>(h.piece);
+            CHECK_NEAR(turned[b], h.speed * 5.0, 0.02 * std::fabs(h.speed * 5.0));
+            ++checked;
+        }
+        for (const Slider& sl : l.sliders) {
+            const size_t b = first_piece + static_cast<size_t>(sl.piece);
+            const double want = static_cast<double>(sl.amplitude) * (1 - std::cos(2 * M_PI * g.sim_time / static_cast<double>(sl.period)));
+            CHECK_NEAR(g.world.bodies[b].pos.x - x0[b], want, 0.03);
+            ++checked;
+        }
+    }
+    CHECK(checked == 2);
+}
+
+TEST(swing_set_every_way_to_the_fort_goes_through_the_wrecking_ball) {
+    // Every degree from -20 to 70, every 1 m/s from 6 to 20: no bird touches a pig or a block of the
+    // fort before it has touched the wrecking ball.
+    const Layout l = layout_named("Swing Set");
+    Layout one = l;
+    one.ammo = {Ammo::Ball};
+    const Level start(one);
+    const int ball = 4 + static_cast<int>(l.walls.size()) + static_cast<int>(l.ropes[0].piece);
+    int sneaked = 0;
+    for (int a = -20; a <= 70; ++a)
+        for (int sp = 6; sp <= 20; ++sp) {
+            Level g = start;
+            g.fire(g.pull_for(static_cast<Real>(a) * phys::kPi / 180, static_cast<Real>(sp)));
+            const int bird = g.shots[0];
+            bool via_ball = false, sneak = false;
+            for (int i = 0; i < 120 * 4 && !via_ball && !sneak; ++i) {
+                g.step();
+                for (const phys::ContactPair& c : g.world.contacts()) {
+                    if (c.manifold.count == 0 || (c.a != bird && c.b != bird)) continue;
+                    const int other = c.a == bird ? c.b : c.a;
+                    if (other == ball) via_ball = true;
+                    else if (g.role(static_cast<size_t>(other)) == Role::Pig || g.role(static_cast<size_t>(other)) == Role::Block) sneak = true;
+                }
+            }
+            if (sneak && !via_ball) {
+                std::printf("    Swing Set: %d deg %d m/s reaches the fort directly\n", a, sp);
+                ++sneaked;
+            }
+        }
+    CHECK(sneaked == 0);
 }

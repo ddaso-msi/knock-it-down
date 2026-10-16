@@ -207,6 +207,7 @@ int main(int argc, char** argv) {
         std::vector<Trial> all;
         int best_wins = -1, best_robust = -1;
         size_t best_tried = 0;
+        std::vector<int> best_scores;  // the scores of the best state's winning tries
         std::vector<Shot> best_solution;
         for (size_t b = 0; b < beam.size(); ++b) {
             const std::optional<Ammo> next_bird = beam[b].level.next_ammo();
@@ -238,11 +239,13 @@ int main(int argc, char** argv) {
                 return trials[i].result->level.status == Status::Won;
             };
             int wins = 0, robust = 0;
+            std::vector<int> scores;
             const Trial* pick = nullptr;
             int pick_neighbours = -1;
             for (const Trial& tr : trials) {
                 if (tr.result->level.status != Status::Won) continue;
                 ++wins;
+                scores.push_back(tr.result->level.score);
                 const int n = won(tr.angle - 1, tr.speed, tr.wait, tr.det) + won(tr.angle + 1, tr.speed, tr.wait, tr.det) +
                               won(tr.angle, tr.speed - 1, tr.wait, tr.det) + won(tr.angle, tr.speed + 1, tr.wait, tr.det);
                 if (n == 4) ++robust;
@@ -255,6 +258,7 @@ int main(int argc, char** argv) {
                 best_wins = wins;
                 best_tried = trials.size();
                 best_robust = robust;
+                best_scores = scores;
                 if (pick) best_solution = pick->result->shots;
             }
             for (Trial& tr : trials) all.push_back(std::move(tr));
@@ -266,6 +270,15 @@ int main(int argc, char** argv) {
             for (const Shot& s : best_solution)
                 std::printf("    {%ld, {%s, %s}, %ld},\n", s.step, literal(s.pull.x).c_str(), literal(s.pull.y).c_str(), s.power);
             std::printf("  that solution with every pull nudged up to 1 cm at random: %d of 100 win\n", jitter(layout, best_solution));
+            std::sort(best_scores.begin(), best_scores.end());
+            const int median = best_scores[best_scores.size() / 2], own = replay(layout, best_solution).score;
+            std::printf("  winning scores: %d to %d, median %d; this solution scores %d\n", best_scores.front(), best_scores.back(), median, own);
+            if (d == layout.par) {
+                // Three stars for a typical win at par (and at least for the recorded one); two for one
+                // bird's bonus less.
+                const int three = std::min(median, own) / 1000 * 1000;
+                std::printf("  stars at par %d: l.stars = {%d, %d};\n", d, three - Level::kBirdBonus, three);
+            }
         }
         // Keep the best K distinct results for the next shot.
         std::sort(all.begin(), all.end(), [](const Trial& a, const Trial& b) { return a.score > b.score; });

@@ -109,7 +109,7 @@ public:
     int shots_left() const { return static_cast<int>(layout_.ammo.size()) - shots_used(); }
     std::optional<Ammo> next_ammo() const;
     bool popped(int body) const { return world.bodies[static_cast<size_t>(body)].mask == 0; }
-    // 3 for par or better, 2 for one over, 1 for any other win; 0 unless won.
+    // By score against the layout's thresholds: 3, 2, or 1 for any other win; 0 unless won.
     int stars() const;
     // Nothing that matters is moving (driven parts like a windmill do not count).
     bool quiet() const;

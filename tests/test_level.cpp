@@ -270,10 +270,13 @@ TEST(popping_every_pig_wins_with_a_bonus_for_the_birds_left) {
     CHECK(!g.can_fire());
 }
 
-TEST(stars_count_birds_against_par) {
-    const int expected[] = {3, 3, 2, 1};  // par 1: 0 or 1 birds is three stars, 2 is two, 3 is one
+TEST(stars_count_the_score_against_the_layouts_thresholds) {
+    // One small pig (5000) and 10000 for every bird left: 35000, 25000, 15000, 5000 with 0 to 3 wasted.
+    const int expected[] = {3, 2, 2, 1};
     for (int wasted = 0; wasted <= 3; ++wasted) {
-        Level g(one_pig());
+        Layout l = one_pig();
+        l.stars = {15000, 30000};
+        Level g(l);
         for (int i = 0; i < wasted; ++i) {
             CHECK(g.fire(kBackwards));
             run(g, 0.5);
@@ -285,6 +288,7 @@ TEST(stars_count_birds_against_par) {
         put(g, b, g.world.bodies[static_cast<size_t>(b)].pos, {0, -2.0f});
         g.step();
         CHECK(g.status == Status::Won);
+        CHECK(g.score == 5000 + (3 - wasted) * Level::kBirdBonus);
         CHECK(g.stars() == expected[wasted]);
     }
 }
@@ -343,7 +347,7 @@ TEST(a_bird_on_target_pops_the_pig) {
     ball.vel = {14.0f, 0};
     for (int i = 0; i < 120 && g.status == Status::Playing; ++i) g.step();
     CHECK(g.status == Status::Won);
-    CHECK(g.stars() == 3);
+    CHECK(g.stars() >= 1);
 }
 
 // ---- blasts ----

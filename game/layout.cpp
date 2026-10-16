@@ -63,6 +63,12 @@ int block(Layout& l, Material m, Vec2 pos, Vec2 half, Real angle) {
     return static_cast<int>(l.pieces.size()) - 1;
 }
 
+int boulder(Layout& l, Material m, Vec2 pos, Real radius) {
+    const int i = block(l, m, pos, {radius, radius});
+    l.pieces[static_cast<size_t>(i)].radius = radius;
+    return i;
+}
+
 int pig(Layout& l, Pig kind, Real x, Real base) {
     Piece p;
     p.kind = Kind::Pig;

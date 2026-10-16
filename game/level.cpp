@@ -417,8 +417,8 @@ void Level::explode(const Fuse& fuse) {
 
 int Level::stars() const {
     if (status != Status::Won) return 0;
-    if (shots_used() <= layout_.par) return 3;
-    return shots_used() == layout_.par + 1 ? 2 : 1;
+    if (score >= layout_.stars.three) return 3;
+    return score >= layout_.stars.two ? 2 : 1;
 }
 
 Role Level::role(size_t body) const {
@@ -528,8 +528,8 @@ std::string Level::stats() const {
 
 std::string Level::result() const {
     char buf[96];
-    std::snprintf(buf, sizeof(buf), "Score %d: %d bird%s (par %d), %.1f s", score, shots_used(), shots_used() == 1 ? "" : "s", layout_.par,
-                  win_time);
+    std::snprintf(buf, sizeof(buf), "Score %d (3 stars: %d), %d bird%s, %.1f s", score, layout_.stars.three, shots_used(),
+                  shots_used() == 1 ? "" : "s", win_time);
     return buf;
 }
 

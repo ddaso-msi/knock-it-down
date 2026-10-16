@@ -43,7 +43,7 @@ namespace {
 
 constexpr float kBarHeight = 88.0f;
 constexpr float kFooterTop = static_cast<float>(kHeight) - kFloorTop * kPixelsPerMeter;
-constexpr int kColumns = 4;
+constexpr int kColumns = 5;
 
 enum class Action { None, Reset, Pause, Help, Menu, Next, Contacts };
 
@@ -75,7 +75,7 @@ constexpr BarButton kButtons[] = {
 
 SDL_FRect card_rect(int i) {
     const int col = i % kColumns, row = i / kColumns;
-    return {80.0f + 285.0f * static_cast<float>(col), 220.0f + 128.0f * static_cast<float>(row), 265.0f, 112.0f};
+    return {60.0f + 236.0f * static_cast<float>(col), 220.0f + 128.0f * static_cast<float>(row), 216.0f, 112.0f};
 }
 bool inside(const SDL_FRect& r, float x, float y) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
 bool over_world(const App& app) { return app.mouse_y > kBarHeight && app.mouse_y < kFooterTop; }
@@ -291,8 +291,9 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
     text(ren, 48.0f, kFooterTop + 8.0f, 2.0f, color::kText, "%s", hint.c_str());
     const Best best = app.progress.best(level.name());
     char counters[96];
-    if (best.stars > 0) SDL_snprintf(counters, sizeof(counters), "Par %d   Best %d   Try %d   %5.1f s", level.layout().par, best.score, level.attempt, level.sim_time);
-    else SDL_snprintf(counters, sizeof(counters), "Par %d   Try %d   %5.1f s", level.layout().par, level.attempt, level.sim_time);
+    const int three = level.layout().stars.three;
+    if (best.stars > 0) SDL_snprintf(counters, sizeof(counters), "3 stars %d   Best %d   Try %d   %5.1f s", three, best.score, level.attempt, level.sim_time);
+    else SDL_snprintf(counters, sizeof(counters), "3 stars %d   Try %d   %5.1f s", three, level.attempt, level.sim_time);
     text(ren, width - 48.0f - text_width(counters, 2.0f), kFooterTop + 8.0f, 2.0f, color::kDim, "%s", counters);
 
     if (app.show_help) {
@@ -356,7 +357,7 @@ void draw_menu(SDL_Renderer* ren, const App& app) {
         outline_rect(ren, r, selected ? color::kToolEdge : best.stars > 0 ? color::kDoneEdge : color::kPanelEdge);
         text(ren, r.x + 16.0f, r.y + 14.0f, 3.0f, color::kTarget, "%d", i + 1);
         text(ren, r.x + 16.0f, r.y + 52.0f, 2.0f, color::kText, "%s", name.c_str());
-        draw_stars(ren, r.x + r.w - 60.0f, r.y + 28.0f, 9.0f, best.stars);
+        draw_stars(ren, r.x + r.w - 52.0f, r.y + 28.0f, 9.0f, best.stars);
         if (best.stars > 0) text(ren, r.x + 16.0f, r.y + 82.0f, 2.0f, color::kDim, "best %d", best.score);
     }
     text_centered(ren, cx, 640.0f, 2.0f, color::kDim, "Click a level, or arrows and Enter.   Q quit");

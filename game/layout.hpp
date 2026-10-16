@@ -114,7 +114,10 @@ struct Layout {
     std::vector<std::string> notes; // extra help lines: what is new in this level
     Vec2 pouch{2.5f, 2.6f};         // where the slingshot holds a bird at rest
     std::vector<Ammo> ammo;         // fired in this order
-    int par = 1;                    // the fewest birds known to solve it (three stars)
+    int par = 1;                    // the fewest birds known to solve it
+    // Score for two and three stars (any win is one). Set from kid_solve: three for a typical win at par,
+    // two for one bird's bonus less.
+    struct { int two = 0, three = 0; } stars;
 
     std::vector<Wall> walls;
     std::vector<Piece> pieces;
@@ -132,6 +135,8 @@ void wall(Layout& l, Vec2 pos, Vec2 half, Real angle = 0);
 void platform(Layout& l, Real x, Real top, Real half_width);
 // Adds one block and returns its index.
 int block(Layout& l, Material m, Vec2 pos, Vec2 half, Real angle = 0);
+// A disc of this material and radius (a boulder, a wrecking ball). Returns its index.
+int boulder(Layout& l, Material m, Vec2 pos, Real radius);
 // A pig sitting on a surface at height `base`, centred on x. Returns its index.
 int pig(Layout& l, Pig p, Real x, Real base);
 // An upright post of half width `hw` and height `h` standing on `base`. Returns its index.
