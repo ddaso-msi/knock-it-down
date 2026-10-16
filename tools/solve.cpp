@@ -1,11 +1,11 @@
 // kid_solve: searches a level for winning shots. This is how every level is checked to be solvable, how
-// its par is found, and where the recorded solutions in game/levels/solutions.hpp come from.
+// its par is found, and where the recorded solutions in tests/solutions.hpp come from.
 //
 //   kid_solve --level N [--depth D] [--beam K] [--angles A] [--speeds S] [--waits 0,0.5,1] [--detonate 0,0.2]
 //             [--ammo bbh]   (try other ammo: b ball, h heavy, x blast)
 //
 // A shot is a launch angle and speed. Every shot on an angle x speed grid is tried from the level's
-// start; the best K results (most targets down) are kept, and the grid is tried again from each of
+// start; the best K results (most pigs popped) are kept, and the grid is tried again from each of
 // them, up to D shots. Shot n+1 is fired once the scene is quiet again (or after 4 s), plus each of the
 // extra --waits (seconds), which matter in levels with moving parts. A blast either goes off when it
 // hits something, or `--detonate` seconds after firing (each value tried; 0 means on impact only).
@@ -34,7 +34,7 @@ namespace {
 
 struct Shot {
     long step;   // the fixed step at which it is fired (counted from the level's start)
-    Vec2 aim;
+    Vec2 pull;   // the sling's pull, as Level::fire takes it
     long detonate = -1;  // for a blast: the step at which it is set off, or -1 for on impact
 };
 
@@ -78,31 +78,27 @@ bool wait_for_turn(Node& n, double extra) {
 }
 
 // Plays the shot and then on until the scene settles or the level decides.
-void play(Node& n, Vec2 aim, double detonate_after) {
-    Shot s{n.steps, aim};
-    n.level.fire(aim);
+void play(Node& n, Vec2 pull, double detonate_after) {
+    Shot s{n.steps, pull};
+    n.level.fire(pull);
     if (detonate_after > 0 && n.level.live_blast >= 0) s.detonate = n.steps + std::lround(detonate_after / static_cast<double>(kTimeStep));
     n.shots.push_back(s);
     const bool last = n.level.shots_left() == 0;
     for (int i = 0; i < 120 * 12 && n.level.status == Status::Playing; ++i) {
         if (s.detonate == n.steps) n.level.detonate();
         advance(n);
-        const bool all_down = n.level.fallen == static_cast<int>(n.level.targets.size());  // a win may still be on hold
-        if (!last && !all_down && n.level.live_blast < 0 && n.level.since_last_shot() > 0.5 && n.level.quiet()) break;
+        if (!last && n.level.live_blast < 0 && n.level.since_last_shot() > 0.5 && n.level.quiet()) break;
     }
     if (n.level.live_blast >= 0) n.shots.back().detonate = -1;  // never went off in time: treat as on impact
 }
 
 double score(const Level& l) {
     if (l.status == Status::Won) return 1e9;
-    if (l.failure == Failure::KeepLost) return -1;
-    // Targets down first; then how far the rest have been moved, so a dented stack beats an untouched one.
-    double moved = 0;
-    for (int t : l.targets) {
-        const Body& b = l.world.bodies[static_cast<size_t>(t)];
-        moved += std::min<double>(2.0, std::fabs(b.angle)) + static_cast<double>(std::min<Real>(3.0f, std::fabs(b.vel.x)));
-    }
-    return l.fallen * 100.0 + moved;
+    // Pigs popped first; then how hurt the rest are, then everything else broken.
+    double hurt = 0;
+    for (int p : l.pigs)
+        if (!l.popped(p)) hurt += 1 - static_cast<double>(l.condition(static_cast<size_t>(p)));
+    return (static_cast<double>(l.pigs.size()) - l.pigs_left) * 100.0 + hurt * 50.0 + l.score / 1000.0;
 }
 
 // Replays shots on their exact steps (as the tests do), then on until the level decides.
@@ -112,13 +108,14 @@ Level replay(const Layout& layout, const std::vector<Shot>& shots) {
     for (long step = 0; step < 120L * 60 && g.status == Status::Playing; ++step) {
         for (const Shot& s : shots)
             if (s.detonate == step) g.detonate();
-        if (next < shots.size() && shots[next].step == step) g.fire(shots[next++].aim);
+        if (next < shots.size() && shots[next].step == step) g.fire(shots[next++].pull);
         g.step();
     }
     return g;
 }
 
-// How forgiving a solution is: the same shots with each aim point moved up to 2 cm in a random direction.
+// How forgiving a solution is: the same shots with each pull moved up to 1 cm in a random direction
+// (about half a degree and an eighth of a metre per second at full stretch).
 int jitter(const Layout& layout, std::vector<Shot> shots) {
     std::uint32_t seed = 12345;
     const auto rnd = [&] {
@@ -129,8 +126,8 @@ int jitter(const Layout& layout, std::vector<Shot> shots) {
     int wins = 0;
     for (int trial = 0; trial < 100; ++trial) {
         for (size_t i = 0; i < shots.size(); ++i) {
-            const Real a = rnd() * 2 * phys::kPi, r = 0.02f * std::sqrt(rnd());
-            shots[i].aim = base[i].aim + Vec2{std::cos(a), std::sin(a)} * r;
+            const Real a = rnd() * 2 * phys::kPi, r = 0.01f * std::sqrt(rnd());
+            shots[i].pull = base[i].pull + Vec2{std::cos(a), std::sin(a)} * r;
         }
         wins += replay(layout, shots).status == Status::Won;
     }
@@ -183,8 +180,10 @@ int main(int argc, char** argv) {
     {
         Node idle(Level{layout});
         for (int i = 0; i < 120 * 10; ++i) advance(idle);
-        std::printf("  untouched for 10 s: %d/%zu targets down, %s\n", idle.level.fallen, idle.level.targets.size(),
-                    idle.level.failure == Failure::KeepLost ? "a KEEP FELL" : "keeps fine");
+        int broken = 0;
+        for (int b : idle.level.blocks) broken += idle.level.popped(b);
+        std::printf("  untouched for 10 s: %zu/%zu pigs popped, %d blocks broken\n", idle.level.pigs.size() - static_cast<size_t>(idle.level.pigs_left),
+                    idle.level.pigs.size(), broken);
     }
 
     const auto angle_of = [&](int i) { return (o.angle_lo + (o.angle_hi - o.angle_lo) * static_cast<Real>(i) / static_cast<Real>(o.angles - 1)) * phys::kPi / 180; };
@@ -214,7 +213,7 @@ int main(int argc, char** argv) {
                         Trial& tr = trials[i];
                         tr.result = beam[b];
                         if (!wait_for_turn(*tr.result, o.waits[static_cast<size_t>(tr.wait)])) { tr.score = -2; continue; }
-                        play(*tr.result, tr.result->level.aim_for(angle_of(tr.angle), speed_of(tr.speed)), dets[static_cast<size_t>(tr.det)]);
+                        play(*tr.result, tr.result->level.pull_for(angle_of(tr.angle), speed_of(tr.speed)), dets[static_cast<size_t>(tr.det)]);
                         tr.score = score(tr.result->level);
                     }
                 });
@@ -254,8 +253,8 @@ int main(int argc, char** argv) {
         if (best_wins > 0) {
             std::printf("  solution:\n");
             for (const Shot& s : best_solution)
-                std::printf("    {%ld, {%.9gf, %.9gf}, %ld},\n", s.step, static_cast<double>(s.aim.x), static_cast<double>(s.aim.y), s.detonate);
-            std::printf("  that solution with every aim nudged up to 2 cm at random: %d of 100 win\n", jitter(layout, best_solution));
+                std::printf("    {%ld, {%.9gf, %.9gf}, %ld},\n", s.step, static_cast<double>(s.pull.x), static_cast<double>(s.pull.y), s.detonate);
+            std::printf("  that solution with every pull nudged up to 1 cm at random: %d of 100 win\n", jitter(layout, best_solution));
         }
         // Keep the best K distinct results for the next shot.
         std::sort(all.begin(), all.end(), [](const Trial& a, const Trial& b) { return a.score > b.score; });
@@ -268,7 +267,7 @@ int main(int argc, char** argv) {
             seen.push_back(tr.score);
             beam.push_back(std::move(*tr.result));
         }
-        std::printf("      best after %d: %.1f targets down\n", d, beam.empty() ? 0.0 : std::floor(score(beam[0].level) / 100));
+        std::printf("      best after %d: %.0f pigs popped\n", d, beam.empty() ? 0.0 : std::floor(score(beam[0].level) / 100));
     }
     return 0;
 }

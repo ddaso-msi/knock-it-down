@@ -2,23 +2,22 @@
 
 #include <algorithm>
 #include <cmath>
+#include <optional>
 
 namespace kid::app {
 
 RoleColors role_colors(Role role) {
     switch (role) {
         case Role::Scenery: return {color::kStatic, color::kStaticEdge};
-        case Role::Driven: return {{122, 98, 78, 255}, {255, 236, 200, 255}};  // loose wood, with a bright edge: it moves by itself
-        case Role::Target: return {color::kTarget, color::kTargetEdge};
-        case Role::Done: return {color::kDone, color::kDoneEdge};
-        case Role::Keep: return {{150, 112, 222, 255}, {222, 204, 255, 255}};
-        case Role::Lost: return {{150, 60, 60, 255}, color::kBad};
-        case Role::Loose: return {{122, 98, 78, 255}, {206, 178, 148, 255}};  // plain wood: brown, nothing to do with you
+        case Role::Driven: return {{150, 110, 70, 255}, {255, 236, 200, 255}};  // wood with a bright edge: it moves by itself
+        case Role::Block: return {{150, 110, 70, 255}, {222, 182, 130, 255}};   // wood; with_material() for the rest
+        case Role::Pig: return {{112, 188, 92, 255}, {204, 242, 176, 255}};
         case Role::Ball: return {color::kTool, color::kToolEdge};
         case Role::Heavy: return {{40, 92, 160, 255}, {130, 180, 240, 255}};
         case Role::Blast: return {{226, 72, 96, 255}, {255, 176, 186, 255}};
         case Role::Hidden: return {{0, 0, 0, 0}, {0, 0, 0, 0}};
         case Role::Guide: return {{96, 104, 128, 255}, {190, 196, 214, 255}};
+        case Role::Band: return {{120, 82, 52, 255}, {168, 120, 78, 255}};
     }
     return {color::kStatic, color::kStaticEdge};
 }
@@ -57,16 +56,49 @@ SDL_Color mix(SDL_Color a, SDL_Color b, float t) {
     return {m(a.r, b.r), m(a.g, b.g), m(a.b, b.b), a.a};
 }
 
-// Stone is darker and greyer, ice is pale and see-through, so a material reads before you read the help.
+// Blocks are coloured by what they are made of, so a material reads before you read the help.
 RoleColors with_material(RoleColors c, Material m) {
-    if (m == Material::Stone) {
-        c.fill = mix(c.fill, {70, 70, 76, 255}, 0.45f);
-        c.edge = mix(c.edge, {200, 200, 200, 255}, 0.3f);
-    } else if (m == Material::Ice) {
-        c.fill = faded(mix(c.fill, {225, 245, 255, 255}, 0.55f), 190);
-        c.edge = mix(c.edge, {255, 255, 255, 255}, 0.6f);
-    }
+    if (m == Material::Stone) return {{108, 110, 120, 255}, {192, 194, 204, 255}};
+    if (m == Material::Ice) return {{160, 210, 235, 170}, {232, 248, 255, 255}};
     return c;
+}
+
+// Lines across a damaged body: one below two thirds of its health, two below a third.
+void draw_cracks(SDL_Renderer* ren, const Body& b, Real condition) {
+    if (condition > 0.66f) return;
+    const Real r = b.shape.type == phys::Shape::Type::Circle ? b.shape.circle.radius * 0.8f
+                                                             : std::min(b.shape.polygon.vertices[2].x, b.shape.polygon.vertices[2].y) * 1.6f;
+    const auto at = [&](Real x, Real y) { return to_screen(b.pos + rotate(b.q, Vec2{x, y} * r)); };
+    set_color(ren, {40, 30, 24, 230});
+    const SDL_FPoint c1[] = {at(-0.6f, 0.5f), at(-0.1f, 0.05f), at(0.15f, 0.3f), at(0.6f, -0.2f)};
+    SDL_RenderLines(ren, c1, 4);
+    if (condition > 0.33f) return;
+    const SDL_FPoint c2[] = {at(-0.4f, -0.6f), at(0.0f, -0.15f), at(0.45f, -0.5f)};
+    SDL_RenderLines(ren, c2, 3);
+}
+
+// A pig: the body is drawn as a disc already; this adds a face that turns with it, and a helmet.
+void draw_pig_face(SDL_Renderer* ren, const Body& b, Pig kind) {
+    const Real r = b.shape.circle.radius;
+    const auto at = [&](Real x, Real y) { return to_screen(b.pos + rotate(b.q, Vec2{x, y} * r)); };
+    const float px = r * kPixelsPerMeter;
+    if (kind == Pig::Helmet) {  // a cap over the top third
+        SDL_FPoint cap[18];
+        for (int i = 0; i < 17; ++i) {
+            const Real a = phys::kPi * (0.12f + 0.76f * static_cast<Real>(i) / 16.0f);
+            cap[i] = at(1.08f * std::cos(a), 1.08f * std::sin(a));
+        }
+        cap[17] = cap[0];
+        fill_polygon(ren, cap, 17, {150, 154, 166, 255});
+        set_color(ren, {214, 218, 228, 255});
+        SDL_RenderLines(ren, cap, 18);
+    }
+    for (Real side : {-1.0f, 1.0f}) {
+        fill_disc(ren, at(0.38f * side, 0.28f), px * 0.22f, {245, 248, 240, 255});
+        fill_disc(ren, at(0.42f * side, 0.26f), px * 0.1f, {20, 24, 20, 255});
+    }
+    fill_disc(ren, at(0, -0.22f), px * 0.3f, {150, 214, 124, 255});
+    for (Real side : {-1.0f, 1.0f}) fill_disc(ren, at(0.12f * side, -0.22f), px * 0.07f, {50, 90, 40, 255});
 }
 
 void ring(SDL_Renderer* ren, Vec2 centre, Real radius, SDL_Color c) {
@@ -82,17 +114,21 @@ void ring(SDL_Renderer* ren, Vec2 centre, Real radius, SDL_Color c) {
 
 }  // namespace
 
-void draw_level(SDL_Renderer* ren, const Level& level, Vec2 pointer, bool pointer_active, bool show_contacts) {
+void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull, bool show_contacts) {
     draw_grid(ren);
     Overlay marks;
-    level.overlay(marks, pointer, pointer_active);
+    level.overlay(marks, pull);
 
     const World& world = level.world;
     for (size_t i = 0; i < world.bodies.size(); ++i) {
         const Role r = level.role(i);
         if (r == Role::Hidden) continue;
-        const RoleColors c = with_material(role_colors(r), level.material(i));
+        RoleColors c = r == Role::Block ? with_material(role_colors(r), level.material(i)) : role_colors(r);
+        const Real condition = level.condition(i);
+        if (condition < 0.34f) c.fill = mix(c.fill, {50, 40, 34, c.fill.a}, 0.35f);  // nearly gone: darker
         draw_body(ren, world.bodies[i], c.fill, c.edge);
+        if (r == Role::Pig) draw_pig_face(ren, world.bodies[i], *level.pig_kind(i));
+        draw_cracks(ren, world.bodies[i], condition);
     }
     for (const phys::Joint& j : world.joints) draw_joint(ren, world, j);
 
@@ -103,8 +139,11 @@ void draw_level(SDL_Renderer* ren, const Level& level, Vec2 pointer, bool pointe
         } else {
             const SDL_FPoint a = to_screen(l.a), b = to_screen(l.b);
             set_color(ren, c);
-            SDL_RenderLine(ren, a.x, a.y, b.x, b.y);
-            SDL_RenderLine(ren, a.x, a.y + 1, b.x, b.y + 1);
+            const int width = l.role == Role::Band ? 6 : l.role == Role::Guide ? 3 : 2;  // the sling's wood, its rubber, the rest
+            for (int k = 0; k < width; ++k) {
+                const float o = static_cast<float>(k) - static_cast<float>(width - 1) * 0.5f;
+                SDL_RenderLine(ren, a.x + o, a.y, b.x + o, b.y);
+            }
         }
     }
     for (const Overlay::Ring& r : marks.rings) {

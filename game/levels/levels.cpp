@@ -4,201 +4,110 @@ namespace kid {
 
 namespace {
 
-using enum Kind;
 using enum Material;
 using enum Ammo;
+using enum Pig;
 
-// 1. The pyramid from Physics Puzzle Lab: one platform, six wooden blocks.
-Layout first_shot() {
-    Layout l;
-    l.name = "First Shot";
-    l.objective = "Knock every block off the platform.";
-    l.ammo = {Ball, Ball, Ball};
-    l.par = 2;
-    const Real line = platform(l, 14.5f, 3.5f, 1.3f);
-    pyramid(l, Target, Wood, 14.5f, 3.5f, 3, 0.35f, line);
-    return l;
-}
+constexpr Real kGround = kFloorTop;
 
-// 2. Two platforms at different heights and distances: one shot cannot reach both.
-Layout two_shelves() {
+// 1. One pig on a wooden table. Knock the table over, or hit the pig.
+Layout first_pig() {
     Layout l;
-    l.name = "Two Shelves";
-    l.objective = "Clear both platforms.";
-    l.ammo = {Ball, Ball, Ball};
-    l.par = 2;
-    const Real near = platform(l, 10.0f, 2.6f, 0.8f);
-    column(l, Target, Wood, 10.0f, 2.6f, 3, {0.35f, 0.35f}, near);
-    const Real far = platform(l, 16.0f, 5.2f, 1.0f);
-    pyramid(l, Target, Wood, 16.0f, 5.2f, 2, 0.35f, far);
-    return l;
-}
-
-// 3. A wall between the launcher and the blocks: the shot has to go up and over.
-Layout over_the_wall() {
-    Layout l;
-    l.name = "Over the Wall";
-    l.objective = "Lob a shot over the wall.";
-    l.notes = {"Aim high and not too hard: the ball has to drop in behind the wall."};
+    l.name = "First Pig";
+    l.objective = "Pop the pig.";
     l.ammo = {Ball, Ball, Ball};
     l.par = 1;
-    wall(l, {8.0f, 2.75f}, {0.3f, 2.25f});
-    const Real line = platform(l, 12.0f, 2.5f, 0.3f);
-    column(l, Target, Wood, 12.0f, 2.5f, 4, {0.35f, 0.35f}, line);
+    const Real top = frame(l, Wood, 14.0f, kGround, 1.2f, 1.2f);
+    pig(l, Small, 14.0f, top);
     return l;
 }
 
-// 4. The blocks stand on a plank bridge between two legs. Knock out a leg and it all comes down.
-Layout weak_point() {
+// 2. Ice: brittle. The whole house comes down on the pig inside it.
+Layout glass_house() {
     Layout l;
-    l.name = "Weak Point";
-    l.objective = "Bring the blocks down off the bridge.";
-    l.notes = {"Brown pieces are loose: they count for nothing, but they hold things up."};
+    l.name = "Glass House";
+    l.objective = "Pop both pigs. Ice breaks easily.";
+    l.notes = {"Pale blocks are ice: they shatter at a touch, and they slide."};
     l.ammo = {Ball, Ball, Ball};
     l.par = 1;
-    platform(l, 14.0f, 2.0f, 2.2f);
-    l.fall_lines.clear();  // the line that counts is the bridge's, not the platform's
-    piece(l, Loose, Wood, {12.6f, 2.0f + 0.8f}, {0.15f, 0.8f}, 0);
-    piece(l, Loose, Wood, {15.4f, 2.0f + 0.8f}, {0.15f, 0.8f}, 0);
-    const Real deck = 2.0f + 1.6f + 0.001f;
-    piece(l, Loose, Wood, {14.0f, deck + 0.12f}, {1.6f, 0.12f}, 0);
-    const Real line = 2.0f + 0.8f;
-    l.fall_lines.push_back({line, 11.6f, 16.4f});
-    pyramid(l, Target, Wood, 14.0f, deck + 0.241f, 3, 0.3f, line);
+    pig(l, Small, 14.0f, kGround);
+    const Real top = frame(l, Ice, 14.0f, kGround, 1.6f, 1.2f);
+    const Real roof = frame(l, Ice, 14.0f, top, 1.0f, 0.9f);
+    pig(l, Small, 14.0f, roof);
     return l;
 }
 
-// 5. Ice slides: a long shelf, and a nudge sends a block a long way.
-Layout ice_shelf() {
+// 3. A two-storey wooden fort with a pig on every floor.
+Layout wood_fort() {
     Layout l;
-    l.name = "Ice Shelf";
-    l.objective = "Slide the ice off the long shelf.";
-    l.notes = {"Pale blocks are ice. They hardly grip anything, not even each other."};
+    l.name = "Wood Fort";
+    l.objective = "Pop all three pigs.";
     l.ammo = {Ball, Ball, Ball};
-    l.par = 2;
-    const Real line = platform(l, 13.0f, 3.0f, 3.0f);
-    column(l, Target, Ice, 10.8f, 3.0f, 2, {0.35f, 0.35f}, line);
-    column(l, Target, Ice, 13.0f, 3.0f, 2, {0.35f, 0.35f}, line);
-    column(l, Target, Ice, 15.2f, 3.0f, 2, {0.35f, 0.35f}, line);
+    l.par = 1;
+    pig(l, Small, 14.5f, kGround);
+    const Real first = frame(l, Wood, 14.5f, kGround, 2.0f, 1.2f);
+    pig(l, Small, 14.5f, first);
+    const Real second = frame(l, Wood, 14.5f, first, 1.2f, 1.0f);
+    pig(l, Small, 14.5f, second);
+    column(l, Wood, 16.6f, kGround, 3, {0.3f, 0.3f});
     return l;
 }
 
-// 6. Stone: three times as heavy as wood. A ball bounces off it; the heavy shot does not.
-Layout heavy_going() {
+// 4. A stone wall in front of a helmet pig. A ball bounces off stone; the heavy bird does not.
+Layout stone_wall() {
     Layout l;
-    l.name = "Heavy Going";
-    l.objective = "Topple the stone column.";
-    l.notes = {"Grey blocks are stone. The big dark shot is five times heavier than a ball."};
+    l.name = "Stone Wall";
+    l.objective = "Get through the stone to the pigs.";
+    l.notes = {"Grey blocks are stone. The big dark bird is five times heavier.",
+               "The helmet pig takes a few hits to pop."};
     l.ammo = {Heavy, Ball, Ball};
     l.par = 1;
-    const Real line = platform(l, 14.0f, 2.6f, 0.9f);
-    column(l, Target, Stone, 14.0f, 2.6f, 3, {0.7f, 0.35f}, line);
+    pyramid(l, Stone, 12.0f, kGround, 3, 0.35f);
+    pig(l, Helmet, 14.2f, kGround);
+    const Real top = frame(l, Stone, 14.2f, kGround, 1.4f, 1.2f);  // a stone roof: no lobbing in
+    pig(l, Small, 14.2f, top);
     return l;
 }
 
-// 7. Purple blocks have to stay where they are: knocking one off fails the level at once.
-Layout hands_off() {
+// 5. Two towers, a pig on each, and a big one between them.
+Layout two_towers() {
     Layout l;
-    l.name = "Hands Off";
-    l.objective = "Clear the far platform. Spare the purple.";
-    l.notes = {"Purple blocks must stay on their platform. Lose one and the level is over."};
-    l.ammo = {Ball, Ball, Ball};
+    l.name = "Two Towers";
+    l.objective = "Pop all three pigs.";
+    l.notes = {"The big pig is tough: drop a tower on it."};
+    l.ammo = {Ball, Ball, Ball, Ball};
     l.par = 2;
-    const Real near = platform(l, 8.5f, 2.4f, 0.6f);
-    column(l, Keep, Wood, 8.5f, 2.4f, 2, {0.35f, 0.35f}, near);
-    const Real far = platform(l, 14.5f, 3.0f, 1.3f);
-    pyramid(l, Target, Wood, 14.5f, 3.0f, 3, 0.35f, far);
+    Real a = frame(l, Wood, 12.0f, kGround, 1.0f, 1.4f);
+    a = frame(l, Ice, 12.0f, a, 1.0f, 1.2f);
+    pig(l, Small, 12.0f, a);
+    pig(l, Big, 14.25f, kGround);
+    Real b = frame(l, Wood, 16.5f, kGround, 1.0f, 1.4f);
+    b = frame(l, Wood, 16.5f, b, 1.0f, 1.2f);
+    b = frame(l, Wood, 16.5f, b, 1.0f, 1.0f);  // not ice: a pig rolls off a plank that slippery
+    pig(l, Small, 16.5f, b);
     return l;
 }
 
-// 8. The blocks sit in a garage that no shot can get into. A row of dominoes can.
-Layout domino_run() {
+// 6. A big pig in a concrete bunker on a ledge. Nothing breaks concrete; a blast reaches through it.
+Layout bunker() {
     Layout l;
-    l.name = "Domino Run";
-    l.objective = "Push the blocks out of the garage.";
-    l.notes = {"The roof stops every shot. Start something that reaches the blocks for you."};
-    l.ammo = {Ball, Ball};
-    l.par = 1;
-    const Real line = platform(l, 12.5f, 4.0f, 3.5f);
-    for (int i = 0; i < 7; ++i) piece(l, Loose, Wood, {9.5f + 0.75f * static_cast<Real>(i), 4.0f + 0.55f}, {0.1f, 0.55f}, 0);
-    wall(l, {15.4f, 5.65f}, {1.1f, 0.15f});
-    column(l, Target, Wood, 15.4f, 4.0f, 2, {0.3f, 0.3f}, line);
-    return l;
-}
-
-// 9. Behind a high wall and under a roof: only a blast reaches them.
-Layout blast_wall() {
-    Layout l;
-    l.name = "Blast Wall";
-    l.objective = "Blast the blocks off from the other side of the wall.";
-    l.notes = {"Red shots explode when they hit something (or when you click in flight),",
-               "pushing everything within 2.5 m away from the blast, even through walls."};
-    l.ammo = {Blast, Blast};
-    l.par = 1;
-    wall(l, {11.0f, 3.75f}, {0.3f, 3.25f});
-    wall(l, {12.6f, 4.75f}, {1.3f, 0.15f});  // roof
-    const Real line = platform(l, 12.7f, 3.0f, 1.0f);
-    pyramid(l, Target, Wood, 12.5f, 3.0f, 2, 0.35f, line);
-    return l;
-}
-
-// 10. The platform will not hold still.
-Layout moving_target() {
-    Layout l;
-    l.name = "Moving Target";
-    l.objective = "Clear the moving platform.";
-    l.notes = {"The platform glides back and forth. Lead the target."};
-    l.ammo = {Ball, Ball, Ball};
-    l.par = 1;
-    const Vec2 at{11.0f, 4.6f}, half{1.1f, 0.15f};  // the left end of its swing
-    constexpr Real kSwing = 2.5f;                       // it glides 5 m to the right and back
-    const int deck = piece(l, Loose, Stone, at, half, 0);
-    l.sliders.push_back({deck, {1, 0}, kSwing, 7.0f});
-    const Real top = at.y + half.y, line = top - 0.1f;
-    l.fall_lines.push_back({line, at.x - half.x - 0.6f, at.x + 2 * kSwing + half.x + 0.6f});
-    pyramid(l, Target, Wood, at.x, top + 0.001f, 2, 0.32f, line);
-    return l;
-}
-
-// 11. A stone wrecking ball hangs in front of the stack. The stack is out of reach; the ball is not.
-Layout wrecking_ball() {
-    Layout l;
-    l.name = "Wrecking Ball";
-    l.objective = "Swing the wrecking ball into the stack.";
-    l.notes = {"The ball on the rope is stone. Hit it hard enough and it swings."};
-    l.ammo = {Ball, Ball, Ball};
-    l.par = 1;
-    wall(l, {12.0f, 0.5f + 1.15f}, {0.25f, 1.15f});  // low wall under the wrecking ball
-    // Roof over the stack. Its left end reaches over the wrecking ball's shoulder: any shorter and a
-    // steep lob slips down between the two.
-    wall(l, {14.4f, 4.4f}, {2.1f, 0.15f});
-    const Real line = platform(l, 14.0f, 2.6f, 0.9f);
-    for (int i = 0; i < 2; ++i) column(l, Target, Wood, 13.65f + 0.75f * static_cast<Real>(i), 2.6f, 2, {0.35f, 0.35f}, line);
-    const int ball = disc(l, Loose, Stone, {12.0f, 3.4f}, 0.55f, 0);
-    l.ropes.push_back({ball, {12.0f, 8.4f}, {12.0f, 3.4f}});
-    return l;
-}
-
-// 12. A turning bar guards the only way in. Time the shot.
-Layout windmill() {
-    Layout l;
-    l.name = "Windmill";
-    l.objective = "Get a shot past the windmill.";
-    l.notes = {"The bar turns all the time and nothing stops it. Fire when the way is clear."};
-    l.ammo = {Ball, Ball, Ball};
+    l.name = "Bunker";
+    l.objective = "Get the big pig in the bunker.";
+    l.notes = {"Red birds explode when they hit something (or when you click in flight).",
+               "A blast pushes and damages everything within 2.5 m, even through walls."};
+    l.ammo = {Blast, Blast, Ball};
     l.par = 2;
-    wall(l, {15.0f, 5.9f}, {2.2f, 0.15f});  // roof: no lobbing in from above
-    const Real line = platform(l, 15.0f, 3.0f, 1.3f);
-    pyramid(l, Target, Wood, 15.0f, 3.0f, 3, 0.35f, line);
-    const int bar = piece(l, Loose, Wood, {11.0f, 4.4f}, {1.7f, 0.12f}, 0);
-    l.hinges.push_back({bar, {11.0f, 4.4f}, true, 1.4f, 3000.0f});
-    wall(l, {11.0f, 0.5f + 1.0f}, {0.2f, 1.0f});  // the post: clear of the bar's tips, but no shot fits under them
+    platform(l, 15.0f, 2.0f, 2.0f);
+    wall(l, {13.6f, 2.7f}, {0.2f, 0.7f});  // the bunker: concrete, part of the scenery
+    wall(l, {16.4f, 2.7f}, {0.2f, 0.7f});
+    wall(l, {15.0f, 3.55f}, {1.6f, 0.15f});
+    pig(l, Big, 15.0f, 2.0f);
+    pig(l, Small, 15.0f, 3.7f);
     return l;
 }
 
 using Maker = Layout (*)();
-constexpr Maker kLevels[] = {first_shot, two_shelves, over_the_wall, weak_point,    ice_shelf,     heavy_going,
-                             hands_off,  domino_run,  blast_wall,    moving_target, wrecking_ball, windmill};
+constexpr Maker kLevels[] = {first_pig, glass_house, wood_fort, stone_wall, two_towers, bunker};
 
 }  // namespace
 

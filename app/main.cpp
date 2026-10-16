@@ -1,6 +1,7 @@
-// Knock It Down: fire shots into a live physics world until every orange block is off its platform.
+// Sling: pull a bird back in the slingshot and let go, into a live physics world, until every pig has popped.
 //
-//   mouse  aim (the dots show the path)        click  fire, or set off a blast in flight
+//   press near the sling, drag back, let go  fire (the dots show the path)
+//   click while a blast bird is in flight    set it off       right click or Esc while pulling: let it down
 //   R  reset the level     Tab  pause     H  help     C  show contacts     N  next level (after solving)
 //   Esc  close the help, then back to the menu
 //   On the menu: click a level, or arrows + Enter, or 1-9.     Q  quit
@@ -11,7 +12,8 @@
 // Nothing is saved in this mode.
 //   --level N          open level N
 //   --mouse X Y        put the cursor at a world position (metres)
-//   --click X Y        press and release the left button there
+//   --press X Y        press the left button there      --drag X Y   move with it held
+//   --release X Y      let go there                     --click X Y  press and release
 //   --shoot DEG SPEED  fire at this angle and speed (the solver's way of saying where)
 //   --steps N          advance the simulation N fixed steps
 //   --key NAME         reset, pause, help, contacts, next, escape
@@ -30,6 +32,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <optional>
 #include <string>
 
 using namespace kid;
@@ -54,6 +57,7 @@ struct App {
     float mouse_x = 0, mouse_y = 0;
     phys::FixedTimestep timestep{kTimeStep};
     Progress progress;
+    std::optional<Vec2> pull;      // a bird is being held back in the sling: by this much
     std::string save_path;         // empty: do not save (script mode)
     bool recorded = false;         // this attempt's win is already in `progress`
 };
@@ -75,12 +79,11 @@ SDL_FRect card_rect(int i) {
 }
 bool inside(const SDL_FRect& r, float x, float y) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
 bool over_world(const App& app) { return app.mouse_y > kBarHeight && app.mouse_y < kFooterTop; }
-Vec2 pointer(const App& app) { return to_world(app.mouse_x, app.mouse_y); }
 
 // ---- saving ----
 
 void load_progress(App& app) {
-    char* dir = SDL_GetPrefPath("Deb AI Labs", "Knock It Down");
+    char* dir = SDL_GetPrefPath("Deb AI Labs", "Sling");
     if (!dir) return;
     app.save_path = std::string(dir) + "progress.txt";
     SDL_free(dir);
@@ -104,10 +107,14 @@ void start_level(App& app, int index) {
     app.level = std::make_unique<Level>(make_layout(index));
     app.index = index;
     app.paused = app.show_help = app.recorded = false;
+    app.pull.reset();
     app.timestep = phys::FixedTimestep(kTimeStep);
 }
 
-void leave_level(App& app) { app.level.reset(); }
+void leave_level(App& app) {
+    app.level.reset();
+    app.pull.reset();
+}
 
 void apply(App& app, Action action) {
     Level& level = *app.level;
@@ -115,6 +122,7 @@ void apply(App& app, Action action) {
         case Action::Reset:
             level.reset();
             app.paused = app.recorded = false;
+            app.pull.reset();
             app.timestep = phys::FixedTimestep(kTimeStep);
             break;
         case Action::Pause: app.paused = !app.paused; break;
@@ -125,8 +133,9 @@ void apply(App& app, Action action) {
             if (app.index + 1 < level_count()) start_level(app, app.index + 1);
             else leave_level(app);
             break;
-        case Action::Menu:  // Esc backs out one thing at a time: the help, then the level
+        case Action::Menu:  // Esc backs out one thing at a time: the help, a pulled bird, then the level
             if (app.show_help) app.show_help = false;
+            else if (app.pull) app.pull.reset();
             else leave_level(app);
             break;
         case Action::None: break;
@@ -150,7 +159,26 @@ void press(App& app, float x, float y) {
             apply(app, b.action);
             return;
         }
-    if (over_world(app) && !app.paused) app.level->press(to_world(x, y));
+    if (!over_world(app) || app.paused) return;
+    Level& level = *app.level;
+    if (level.detonate()) return;  // a click while a blast bird is in flight sets it off
+    // Grab the bird: anywhere near the sling counts, it does not have to be a precise click.
+    constexpr Real kGrab = 1.5f;
+    const Vec2 p = to_world(x, y);
+    if (level.can_fire() && distance(p, level.layout().pouch) < kGrab) app.pull = level.pull_to(p);
+}
+
+void move(App& app, float x, float y) {
+    app.mouse_x = x;
+    app.mouse_y = y;
+    if (app.level && app.pull) app.pull = app.level->pull_to(to_world(x, y));
+}
+
+void release(App& app, float x, float y) {
+    move(app, x, y);
+    if (!app.level || !app.pull) return;
+    app.level->fire(*app.pull);  // a pull too short to count just lets the bird back down
+    app.pull.reset();
 }
 
 void key(App& app, SDL_Keycode k) {
@@ -183,14 +211,17 @@ void handle_event(App& app, const SDL_Event& e) {
             if (!e.key.repeat) key(app, e.key.key);
             break;
         case SDL_EVENT_MOUSE_MOTION:
-            app.mouse_x = e.motion.x;
-            app.mouse_y = e.motion.y;
+            move(app, e.motion.x, e.motion.y);
             if (!app.level)
                 for (int i = 0; i < level_count(); ++i)
                     if (inside(card_rect(i), app.mouse_x, app.mouse_y)) app.index = i;
             break;
         case SDL_EVENT_MOUSE_BUTTON_DOWN:  // one event per press: holding the button does not repeat
             if (e.button.button == SDL_BUTTON_LEFT) press(app, e.button.x, e.button.y);
+            if (e.button.button == SDL_BUTTON_RIGHT) app.pull.reset();
+            break;
+        case SDL_EVENT_MOUSE_BUTTON_UP:
+            if (e.button.button == SDL_BUTTON_LEFT) release(app, e.button.x, e.button.y);
             break;
         default: break;
     }
@@ -202,7 +233,7 @@ void update(App& app, phys::Real frame_seconds) {
     app.timestep.advance(frame_seconds, [&](phys::Real) { app.level->step(); });
     if (app.level->status == Status::Won && !app.recorded) {
         app.recorded = true;
-        if (app.progress.record(app.level->name(), app.level->stars(), app.level->shots_used())) save_progress(app);
+        if (app.progress.record(app.level->name(), app.level->stars(), app.level->score)) save_progress(app);
     }
 }
 
@@ -260,14 +291,16 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
     text(ren, 48.0f, kFooterTop + 8.0f, 2.0f, color::kText, "%s", hint.c_str());
     const Best best = app.progress.best(level.name());
     char counters[96];
-    if (best.stars > 0) SDL_snprintf(counters, sizeof(counters), "Par %d   Best %d   Try %d   %5.1f s", level.layout().par, best.shots, level.attempt, level.sim_time);
+    if (best.stars > 0) SDL_snprintf(counters, sizeof(counters), "Par %d   Best %d   Try %d   %5.1f s", level.layout().par, best.score, level.attempt, level.sim_time);
     else SDL_snprintf(counters, sizeof(counters), "Par %d   Try %d   %5.1f s", level.layout().par, level.attempt, level.sim_time);
     text(ren, width - 48.0f - text_width(counters, 2.0f), kFooterTop + 8.0f, 2.0f, color::kDim, "%s", counters);
 
     if (app.show_help) {
         const std::vector<std::string> lines = level.help();
         const char* keys[] = {
-            "Click  fire, or set off a blast in flight",
+            "Drag   pull a bird back from the sling; let go to fire",
+            "Click  set off a blast bird in flight",
+            "RMB    let a pulled bird back down (right mouse button)",
             "R      reset the level",
             "Tab    pause or resume",
             "N      next level, once solved",
@@ -309,8 +342,8 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
 void draw_menu(SDL_Renderer* ren, const App& app) {
     draw_grid(ren);
     const float cx = static_cast<float>(kWidth) * 0.5f;
-    text_centered(ren, cx, 60.0f, 6.0f, color::kText, "KNOCK IT DOWN");
-    text_centered(ren, cx, 126.0f, 2.0f, color::kDim, "Real physics. Every orange block has to go.");
+    text_centered(ren, cx, 60.0f, 6.0f, color::kText, "SLING");
+    text_centered(ren, cx, 126.0f, 2.0f, color::kDim, "Pull back, aim, let go. Pop every pig.");
     char total[48];
     SDL_snprintf(total, sizeof(total), "%d of %d stars", app.progress.total_stars(), 3 * level_count());
     text_centered(ren, cx, 172.0f, 2.0f, color::kTarget, total);
@@ -324,7 +357,7 @@ void draw_menu(SDL_Renderer* ren, const App& app) {
         text(ren, r.x + 16.0f, r.y + 14.0f, 3.0f, color::kTarget, "%d", i + 1);
         text(ren, r.x + 16.0f, r.y + 52.0f, 2.0f, color::kText, "%s", name.c_str());
         draw_stars(ren, r.x + r.w - 60.0f, r.y + 28.0f, 9.0f, best.stars);
-        if (best.stars > 0) text(ren, r.x + 16.0f, r.y + 82.0f, 2.0f, color::kDim, "best %d shot%s", best.shots, best.shots == 1 ? "" : "s");
+        if (best.stars > 0) text(ren, r.x + 16.0f, r.y + 82.0f, 2.0f, color::kDim, "best %d", best.score);
     }
     text_centered(ren, cx, 640.0f, 2.0f, color::kDim, "Click a level, or arrows and Enter.   Q quit");
 }
@@ -336,8 +369,7 @@ void draw(SDL_Renderer* ren, const App& app) {
         draw_menu(ren, app);
         return;
     }
-    const bool aiming = over_world(app) && !app.paused && !app.show_help;
-    draw_level(ren, *app.level, pointer(app), aiming, app.show_contacts);
+    draw_level(ren, *app.level, app.paused || app.show_help ? std::nullopt : app.pull, app.show_contacts);
     draw_hud(ren, app);
 }
 
@@ -350,21 +382,16 @@ bool run_script(App& app, SDL_Renderer* ren, int argc, char** argv) {
         const char* a = argv[i];
         if (is(a, "--level")) {
             start_level(app, static_cast<int>(number(++i)) - 1);
-        } else if (is(a, "--mouse") || is(a, "--click")) {
+        } else if (is(a, "--mouse") || is(a, "--press") || is(a, "--drag") || is(a, "--release") || is(a, "--click")) {
             const SDL_FPoint p = to_screen({number(i + 1), number(i + 2)});
             i += 2;
-            app.mouse_x = p.x;
-            app.mouse_y = p.y;
-            if (is(a, "--click")) press(app, p.x, p.y);
+            if (is(a, "--press") || is(a, "--click")) press(app, p.x, p.y);
+            if (is(a, "--mouse") || is(a, "--drag")) move(app, p.x, p.y);
+            if (is(a, "--release") || is(a, "--click")) release(app, p.x, p.y);
         } else if (is(a, "--shoot")) {
             const float deg = number(i + 1), speed = number(i + 2);
             i += 2;
-            if (app.level) {
-                const SDL_FPoint p = to_screen(app.level->aim_for(deg * phys::kPi / 180.0f, speed));
-                app.mouse_x = p.x;
-                app.mouse_y = p.y;
-                app.level->fire(app.level->aim_for(deg * phys::kPi / 180.0f, speed));
-            }
+            if (app.level) app.level->fire(app.level->pull_for(deg * phys::kPi / 180.0f, speed));
         } else if (is(a, "--steps")) {
             const int n = static_cast<int>(number(++i));
             for (int s = 0; s < n; ++s) update(app, kTimeStep * 1.0001f);
@@ -398,7 +425,7 @@ int main(int argc, char** argv) {
     }
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("Knock It Down", kWidth, kHeight, 0, &window, &renderer)) {
+    if (!SDL_CreateWindowAndRenderer("Sling", kWidth, kHeight, 0, &window, &renderer)) {
         SDL_Log("window creation failed: %s", SDL_GetError());
         SDL_Quit();
         return 1;

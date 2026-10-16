@@ -28,6 +28,8 @@ void fill_rect(SDL_Renderer* ren, const SDL_FRect& r, SDL_Color fill);
 void outline_rect(SDL_Renderer* ren, const SDL_FRect& r, SDL_Color edge);
 // A disc given in screen pixels.
 void fill_disc(SDL_Renderer* ren, SDL_FPoint centre, float radius, SDL_Color fill);
+// A convex polygon given in screen pixels (at most 32 points).
+void fill_polygon(SDL_Renderer* ren, const SDL_FPoint* pts, int count, SDL_Color fill);
 // A five-pointed star given in screen pixels (`radius` to the points).
 void fill_star(SDL_Renderer* ren, SDL_FPoint centre, float radius, SDL_Color fill);
 // A body, filled and outlined. Circles get a spoke so spin is visible.

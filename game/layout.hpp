@@ -1,7 +1,8 @@
 #pragma once
-// A level as plain data: the arena's static walls, the loose pieces, what holds some of them in place,
-// the launcher and what it fires. The rules (game/level.hpp) turn a Layout into a World and play it.
-// Levels are written with the builder functions at the bottom (game/levels/levels.cpp).
+// A level as plain data: the arena's static walls, the structure (breakable blocks) and the pigs in it,
+// what holds some pieces in place, the slingshot and the birds it fires. The rules (game/level.hpp)
+// turn a Layout into a World and play it. Levels are written with the builder functions at the bottom
+// (game/levels/levels.cpp).
 #include <phys/world.hpp>
 
 #include <string>
@@ -20,15 +21,26 @@ constexpr Real kFloorTop = 0.5f;
 // Every level advances by this step and nothing else, so a replay of the same shots is identical.
 constexpr Real kTimeStep = 1.0f / 120.0f;
 
-// What a loose piece is made of. Stone is three times as heavy as wood; ice is wood that slides.
+// What a block is made of. Ice is light, slippery and brittle; stone is heavy and tough.
 enum class Material { Wood, Stone, Ice };
 struct MaterialProps {
     Real density, friction, restitution;
+    Real toughness;  // health per square metre of block, in N s of impact (see Level::step)
+    int points;      // score for breaking one
 };
 MaterialProps material_props(Material m);
 
-// What the launcher fires.
-//   Ball   the ordinary shot
+// The pigs. Popping every one of them wins the level.
+enum class Pig { Small, Helmet, Big };
+struct PigProps {
+    const char* name;
+    Real radius, health;
+    int points;
+};
+PigProps pig_props(Pig p);
+
+// What the slingshot fires.
+//   Ball   the ordinary bird
 //   Heavy  bigger and five times the mass: it shoves stone where a ball bounces off
 //   Blast  goes off at the first thing it touches (or when clicked in flight), pushing everything near it away
 enum class Ammo { Ball, Heavy, Blast };
@@ -38,20 +50,17 @@ struct AmmoProps {
 };
 AmmoProps ammo_props(Ammo a);
 
-// What a loose piece means to the player.
-//   Target  knock it off its platform (its centre below `fall_y`)
-//   Keep    must NOT end up below `fall_y`: losing one fails the level at once
-//   Loose   no objective: planks, barrels, counterweights, things to use
-enum class Kind { Target, Keep, Loose };
+enum class Kind { Block, Pig };
 
 struct Piece {
-    Kind kind = Kind::Target;
-    Material material = Material::Wood;
+    Kind kind = Kind::Block;
+    Material material = Material::Wood;  // Block
+    Pig pig = Pig::Small;                // Pig
     Vec2 pos;
     Vec2 half{0.35f, 0.35f};  // a box's half extents...
-    Real radius = 0;          // ...or, if positive, a disc of this radius
+    Real radius = 0;          // ...or, if positive, a disc of this radius (pigs are always discs)
     Real angle = 0;
-    Real fall_y = 0;          // Target and Keep: the line that counts
+    bool breakable = true;    // false: takes no damage (a windmill's bar, a rail's deck)
 };
 
 struct Wall {  // a static box
@@ -88,42 +97,42 @@ struct Slider {
     Real force = 5000;
 };
 
-// A dashed line the player sees: "below here counts as off". One per platform.
-struct FallLine {
-    Real y, x0, x1;
-};
-
 struct Layout {
     std::string name;
     std::string objective;          // one line in the status bar
     std::vector<std::string> notes; // extra help lines: what is new in this level
-    Vec2 muzzle{2.0f, 2.6f};        // where a shot starts; a pedestal is built under it
+    Vec2 pouch{2.5f, 2.6f};         // where the slingshot holds a bird at rest
     std::vector<Ammo> ammo;         // fired in this order
-    int par = 1;                    // the fewest shots known to solve it (three stars)
+    int par = 1;                    // the fewest birds known to solve it (three stars)
 
     std::vector<Wall> walls;
     std::vector<Piece> pieces;
     std::vector<Hinge> hinges;
     std::vector<Rope> ropes;
     std::vector<Slider> sliders;
-    std::vector<FallLine> fall_lines;
 };
 
 // ---- building layouts ----
+// Pieces are laid out a millimetre apart so nothing starts out overlapping; `base` is the height of
+// the surface a piece stands on.
 
-// Adds a pieceless static box.
 void wall(Layout& l, Vec2 pos, Vec2 half, Real angle = 0);
-// A platform: a slab whose top is at `top`, centred on x, with a pillar down to the floor (unless
-// `pillar` is false: then it is a shelf that has to be held up by walls you add yourself). Adds the
-// fall line 0.1 m under the top, and returns that line's height for pieces standing on it.
-Real platform(Layout& l, Real x, Real top, Real half_width, bool pillar = true);
-// Adds one piece and returns its index.
-int piece(Layout& l, Kind kind, Material m, Vec2 pos, Vec2 half, Real fall_y, Real angle = 0);
-int disc(Layout& l, Kind kind, Material m, Vec2 pos, Real radius, Real fall_y);
-// Equal square blocks of half size `half`, in rows of rows, rows-1, ... 1, standing on a surface at
-// height `base`, centred on x. Returns the first piece's index (they are consecutive).
-int pyramid(Layout& l, Kind kind, Material m, Real x, Real base, int rows, Real half, Real fall_y);
-// `count` boxes stacked straight up from `base`, centred on x.
-int column(Layout& l, Kind kind, Material m, Real x, Real base, int count, Vec2 half, Real fall_y);
+// A static slab whose top is at `top`, centred on x, on a pillar down to the floor.
+void platform(Layout& l, Real x, Real top, Real half_width);
+// Adds one block and returns its index.
+int block(Layout& l, Material m, Vec2 pos, Vec2 half, Real angle = 0);
+// A pig sitting on a surface at height `base`, centred on x. Returns its index.
+int pig(Layout& l, Pig p, Real x, Real base);
+// An upright post of half width `hw` and height `h` standing on `base`. Returns its index.
+int post(Layout& l, Material m, Real x, Real base, Real h, Real hw = 0.12f);
+// A plank of half width `hw`, `t` thick, lying on a surface at `base`. Returns its index.
+int plank(Layout& l, Material m, Real x, Real base, Real hw, Real t = 0.2f);
+// A frame: two posts `span` apart and a plank across them, overhanging each post a little. Returns
+// the height of the plank's top.
+Real frame(Layout& l, Material m, Real x, Real base, Real span, Real h);
+// Square blocks of half size `half` in rows of rows, rows-1, ... 1. Returns the first block's index.
+int pyramid(Layout& l, Material m, Real x, Real base, int rows, Real half);
+// `count` boxes stacked straight up. Returns the first one's index.
+int column(Layout& l, Material m, Real x, Real base, int count, Vec2 half);
 
 }  // namespace kid

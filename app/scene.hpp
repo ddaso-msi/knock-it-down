@@ -4,6 +4,8 @@
 
 #include <level.hpp>
 
+#include <optional>
+
 namespace kid::app {
 
 struct RoleColors {
@@ -12,7 +14,8 @@ struct RoleColors {
 RoleColors role_colors(Role role);
 
 void draw_grid(SDL_Renderer* ren);
-void draw_level(SDL_Renderer* ren, const Level& level, Vec2 pointer, bool pointer_active, bool show_contacts);
+// `pull`: the bird is being held back in the sling.
+void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull, bool show_contacts);
 // A small picture of one shot type, for the ammo queue.
 void draw_ammo_icon(SDL_Renderer* ren, SDL_FPoint centre, Ammo a, bool spent);
 

@@ -64,6 +64,8 @@ void fill_disc(SDL_Renderer* ren, SDL_FPoint centre, float radius, SDL_Color fil
     fill_fan(ren, pts, kSegments, fill);
 }
 
+void fill_polygon(SDL_Renderer* ren, const SDL_FPoint* pts, int count, SDL_Color fill) { fill_fan(ren, pts, count, fill); }
+
 void fill_star(SDL_Renderer* ren, SDL_FPoint centre, float radius, SDL_Color fill) {
     // A fan from the centre works for a star: every point of it is visible from there.
     SDL_Vertex verts[11];

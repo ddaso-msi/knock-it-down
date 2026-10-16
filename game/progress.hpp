@@ -8,7 +8,7 @@ namespace kid {
 
 struct Best {
     int stars = 0;  // 1 to 3 once solved
-    int shots = 0;  // fewest shots in a win
+    int score = 0;  // highest score in a win
 };
 
 struct Progress {
@@ -16,12 +16,12 @@ struct Progress {
     std::map<std::string, Best> levels;
 
     // Keeps the better of the old and the new result. Returns whether anything improved.
-    bool record(const std::string& level, int stars, int shots);
+    bool record(const std::string& level, int stars, int score);
     Best best(const std::string& level) const;
     int total_stars() const;
 };
 
-// One line per solved level: "stars shots name". Lines that do not parse are skipped, so a damaged
+// One line per solved level: "stars score name". Lines that do not parse are skipped, so a damaged
 // file costs at most the lines that are damaged.
 std::string format_progress(const Progress& p);
 Progress parse_progress(const std::string& text);
