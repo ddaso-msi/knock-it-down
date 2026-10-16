@@ -5,7 +5,8 @@ A slingshot physics game (working title) on the from-scratch 2D engine in
 and bring down structures of wood, ice and stone until every pig has popped. It grew out of Knock It
 Down, which is on the `main` branch of this repo; this is the `sling` branch.
 
-No art: everything is drawn from plain shapes. The names and the look are our own.
+No art files: everything is drawn from shapes and gradients, and every sound is synthesised. The
+names and the look are our own.
 
 ## How it plays
 
@@ -42,6 +43,18 @@ No art: everything is drawn from plain shapes. The names and the look are our ow
 
 What you see and hear on top of the physics is only drawn and played: the simulation and the
 recorded solutions are untouched by it.
+- **The world** has a sky gradient, a sun, drifting clouds, and two layers of hills that move
+  with the camera at their own depth. There are three themes: a meadow (levels 1-5), snow with
+  falling flakes (6-10), and dusk with castle silhouettes (11-15).
+- **Blocks** are shaded with their lit top edge and a shadow beneath. Wood has grain and knots,
+  stone is speckled with a bevel, and ice is glassy with glints. Static scenery is rock.
+- **Pigs** have ears and snouts. Their eyes follow the bird, they blink, and they wince when hurt.
+  The helmet pig has a steel cap and the big pig a moustache.
+- **Birds** have eyes, a stern brow, a beak and tail feathers. The bomber has a lit fuse, the dart a
+  crest, and the dropper a tuft. The egg is speckled.
+- **Debris** takes its shape from the material (wood splinters, ice shards, stone chunks), and a
+  popped pig goes in a puff of smoke.
+- It draws at the window's full pixel density, so it is sharp on a Retina screen.
 - **The camera** shows the whole arena while you aim. Once a bird is away it frames the bird
   together with everything still standing, moving in as close as that allows. It holds on the crash,
   then eases back out.

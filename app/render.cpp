@@ -51,6 +51,13 @@ void circle_points(SDL_FPoint centre, float radius, SDL_FPoint* out) {
 
 void set_view(Vec2 centre, float pixels_per_meter, SDL_FPoint shake) { g_view = {centre, pixels_per_meter, shake}; }
 float view_scale() { return g_view.scale; }
+Vec2 view_centre() { return g_view.centre; }
+
+float g_density = 1;
+void set_pixel_density(SDL_Renderer* ren, float density) {
+    g_density = density > 0 ? density : 1;
+    SDL_SetRenderScale(ren, g_density, g_density);
+}
 
 SDL_FPoint to_screen(Vec2 w) {
     return {(w.x - g_view.centre.x) * g_view.scale + static_cast<float>(kWidth) * 0.5f + g_view.shake.x,
@@ -137,9 +144,9 @@ void text(SDL_Renderer* ren, float x, float y, float scale, SDL_Color c, const c
     std::vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
     set_color(ren, c);
-    SDL_SetRenderScale(ren, scale, scale);
+    SDL_SetRenderScale(ren, scale * g_density, scale * g_density);
     SDL_RenderDebugText(ren, x / scale, y / scale, buf);
-    SDL_SetRenderScale(ren, 1.0f, 1.0f);
+    SDL_SetRenderScale(ren, g_density, g_density);
 }
 
 float text_width(const char* str, float scale) {

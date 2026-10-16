@@ -12,6 +12,9 @@ constexpr float kPixelsPerMeter = 64.0f;  // at this zoom the window shows the 2
 // offset in pixels. The camera sets it each frame; until then it shows the whole arena.
 void set_view(phys::Vec2 centre, float pixels_per_meter, SDL_FPoint shake = {0, 0});
 float view_scale();
+phys::Vec2 view_centre();
+// Draw at the window's real pixel density (2 on a Retina screen), in the same 1280 x 720 coordinates.
+void set_pixel_density(SDL_Renderer* ren, float density);
 SDL_FPoint to_screen(phys::Vec2 w);
 phys::Vec2 to_world(float sx, float sy);
 // A length in metres, in pixels at the current zoom.

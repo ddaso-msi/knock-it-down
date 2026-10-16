@@ -475,7 +475,7 @@ std::optional<Pig> Level::pig_kind(size_t body) const {
     return layout_.pieces[static_cast<size_t>(p)].pig;
 }
 
-void Level::overlay(Overlay& out, std::optional<Vec2> pull, Vec2 wobble) const {
+void Level::overlay(Overlay& out, std::optional<Vec2> pull, Vec2 wobble, bool sling) const {
     for (const Flash& f : flashes_) {
         const float age = static_cast<float>((sim_time - f.time) / kFlashTime);
         out.rings.push_back({f.p, f.radius * (0.3f + 0.7f * age), 1.0f - age});
@@ -484,9 +484,11 @@ void Level::overlay(Overlay& out, std::optional<Vec2> pull, Vec2 wobble) const {
     // The slingshot: a post and a fork, with bands to the bird (or to each other when it is empty).
     const Vec2 pouch = layout_.pouch;
     const Vec2 fork = pouch + Vec2{0, -0.45f}, back = pouch + Vec2{-0.22f, 0.12f}, front = pouch + Vec2{0.22f, 0.12f};
-    out.lines.push_back({{pouch.x, kFloorTop}, fork, Role::Band, false});
-    out.lines.push_back({fork, back, Role::Band, false});
-    out.lines.push_back({fork, front, Role::Band, false});
+    if (sling) {
+        out.lines.push_back({{pouch.x, kFloorTop}, fork, Role::Band, false});
+        out.lines.push_back({fork, back, Role::Band, false});
+        out.lines.push_back({fork, front, Role::Band, false});
+    }
     const std::optional<Ammo> next = status == Status::Playing ? next_ammo() : std::nullopt;
     const Vec2 held = pull ? pull_to(pouch + *pull) : Vec2{};
     const Vec2 bird = launch_point(held);
@@ -494,7 +496,8 @@ void Level::overlay(Overlay& out, std::optional<Vec2> pull, Vec2 wobble) const {
         const Body& b = world.bodies[static_cast<size_t>(flying_)];
         out.rings.push_back({b.pos, b.shape.circle.radius + 0.18f, 0.6f});
     }
-    if (next) {
+    if (!sling) {
+    } else if (next) {
         const Role r = role_of(*next);
         out.lines.push_back({back, bird, Role::Guide, false});
         out.dots.push_back({bird, ammo_props(*next).radius, can_fire() ? r : Role::Guide});

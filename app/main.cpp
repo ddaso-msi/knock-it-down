@@ -23,6 +23,7 @@
 #include "audio.hpp"
 #include "camera.hpp"
 #include "effects.hpp"
+#include "look.hpp"
 #include "render.hpp"
 #include "scene.hpp"
 
@@ -72,6 +73,7 @@ struct App {
     float slow = 0;                // seconds of slow motion still to go
     float freeze = 0;              // seconds the simulation still waits after a big hit
     Camera camera;
+    Weather weather;
     Audio audio;
     Soundboard sounds;
     size_t hits_seen = 0, booms_seen = 0, pops_seen = 0;
@@ -288,6 +290,7 @@ void update(App& app, phys::Real frame_seconds) {
         if (level.pops[app.pops_seen].kind == Kind::Pig) app.freeze = std::max(app.freeze, kFreezeTime);
 
     app.fx.update(level, dt);
+    app.weather.update(theme_for(app.index), frame_seconds);
     app.sounds.update(level, app.audio, app.pull);
     app.camera.update(level, app.pull.has_value(), dt);
 
@@ -351,6 +354,7 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
 
     // The shots, in firing order, just under the bar: the next one first and bright.
     const std::vector<Ammo>& ammo = level.layout().ammo;
+    fill_rect(ren, {0, kBarHeight, 44.0f * static_cast<float>(ammo.size()) + 190.0f, 60.0f}, {18, 21, 30, 140});
     float x = 34.0f;
     for (size_t i = 0; i < ammo.size(); ++i) {
         draw_ammo_icon(ren, {x, kBarHeight + 30.0f}, ammo[i], static_cast<int>(i) < level.shots_used());
@@ -360,7 +364,7 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
 
     // The footer: what to do now on the left, the counters on the right. It has its own strip, since
     // the floor under it moves when the camera does.
-    fill_rect(ren, {0, kFooterTop, width, static_cast<float>(kHeight) - kFooterTop}, color::kPanel);
+    fill_rect(ren, {0, kFooterTop, width, static_cast<float>(kHeight) - kFooterTop}, {18, 21, 30, 150});  // the grass shows through
     const std::string hint = level.hint();
     text(ren, 48.0f, kFooterTop + 8.0f, 2.0f, color::kText, "%s", hint.c_str());
     // The counters on the right, as many as fit beside the hint: the time goes first, then the best score.
@@ -423,8 +427,9 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
 }
 
 void draw_menu(SDL_Renderer* ren, const App& app) {
-    draw_grid(ren);
     const float cx = static_cast<float>(kWidth) * 0.5f;
+    fill_rect(ren, {0, 36.0f, static_cast<float>(kWidth), 166.0f}, {18, 21, 30, 150});  // so the title reads against the sky
+    text_centered(ren, cx + 4.0f, 64.0f, 6.0f, {10, 12, 18, 200}, "SLING");
     text_centered(ren, cx, 60.0f, 6.0f, color::kText, "SLING");
     text_centered(ren, cx, 126.0f, 2.0f, color::kDim, "Pull back, aim, let go. Pop every pig.");
     char total[48];
@@ -442,7 +447,8 @@ void draw_menu(SDL_Renderer* ren, const App& app) {
         draw_stars(ren, r.x + r.w - 52.0f, r.y + 28.0f, 9.0f, best.stars);
         if (best.stars > 0) text(ren, r.x + 16.0f, r.y + 82.0f, 2.0f, color::kDim, "best %d", best.score);
     }
-    text_centered(ren, cx, 640.0f, 2.0f, color::kDim, "Click a level, or arrows and Enter.   Q quit");
+    fill_rect(ren, {0, 626.0f, static_cast<float>(kWidth), 44.0f}, {18, 21, 30, 150});
+    text_centered(ren, cx, 640.0f, 2.0f, color::kText, "Click a level, or arrows and Enter.   Q quit");
 }
 
 void draw(SDL_Renderer* ren, App& app) {
@@ -450,11 +456,14 @@ void draw(SDL_Renderer* ren, App& app) {
     SDL_RenderClear(ren);
     if (!app.level) {
         set_view({kWorldW * 0.5f, kWorldH * 0.5f}, kPixelsPerMeter);
+        draw_backdrop(ren, theme_for(0), static_cast<double>(SDL_GetTicks()) / 1000.0);
+        draw_ground(ren, theme_for(0));
         draw_menu(ren, app);
         return;
     }
     app.camera.apply();
-    draw_level(ren, *app.level, app.paused || app.show_help ? std::nullopt : app.pull, app.show_contacts, &app.fx);
+    draw_level(ren, *app.level, app.paused || app.show_help ? std::nullopt : app.pull, app.show_contacts, &app.fx, theme_for(app.index));
+    app.weather.draw(ren);
     app.fx.draw_over(ren, *app.level, to_world(0, kBarHeight).y);
     draw_hud(ren, app);
 }
@@ -519,12 +528,13 @@ int main(int argc, char** argv) {
     }
     SDL_Window* window = nullptr;
     SDL_Renderer* renderer = nullptr;
-    if (!SDL_CreateWindowAndRenderer("Sling", kWidth, kHeight, 0, &window, &renderer)) {
+    if (!SDL_CreateWindowAndRenderer("Sling", kWidth, kHeight, SDL_WINDOW_HIGH_PIXEL_DENSITY, &window, &renderer)) {
         SDL_Log("window creation failed: %s", SDL_GetError());
         SDL_Quit();
         return 1;
     }
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
+    set_pixel_density(renderer, SDL_GetWindowPixelDensity(window));  // crisp on a Retina screen
 
     App app;
     int result = 0;

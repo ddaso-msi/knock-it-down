@@ -1,5 +1,6 @@
 #include "effects.hpp"
 
+#include "look.hpp"
 #include "scene.hpp"
 
 #include <algorithm>
@@ -22,6 +23,7 @@ float Effects::random() {
 
 void Effects::clear() {
     bits_.clear();
+    puffs_.clear();
     points_.clear();
     trail_.clear();
     last_trail_.clear();
@@ -42,15 +44,20 @@ void Effects::update(const Level& level, float dt) {
     // Each pop: a burst of bits in its colours, more for bigger things, and its points.
     for (; pops_seen_ < level.pops.size(); ++pops_seen_) {
         const Level::Pop& pop = level.pops[pops_seen_];
-        const RoleColors c = pop.kind == Kind::Pig ? role_colors(Role::Pig) : body_colors(Role::Block, pop.material);
-        const int count = 6 + static_cast<int>(pop.size * 14.0f);
+        if (pop.kind == Kind::Pig)  // a pig goes in a puff of smoke
+            for (int k = 0; k < 7; ++k)
+                puffs_.push_back({pop.pos + Vec2{random() - 0.5f, random() - 0.5f} * (pop.size * 1.2f), pop.size * (0.5f + 0.5f * random()), 0.6f + 0.3f * random()});
+        const SDL_Color fill = pop.kind == Kind::Pig ? SDL_Color{126, 200, 98, 255} : material_color(pop.material);
+        const RoleColors c{fill, SDL_Color{static_cast<Uint8>(fill.r * 3 / 4), static_cast<Uint8>(fill.g * 3 / 4), static_cast<Uint8>(fill.b * 3 / 4), fill.a}};
+        const int shape = pop.kind == Kind::Pig ? 0 : pop.material == Material::Wood ? 1 : pop.material == Material::Ice ? 2 : 0;
+        const int count = (pop.kind == Kind::Pig ? 3 : 6) + static_cast<int>(pop.size * 14.0f);
         for (int i = 0; i < count; ++i) {
             const float a = random() * 6.2832f, speed = 1.5f + random() * 4.0f;
             const Vec2 v{std::cos(a) * speed, std::sin(a) * speed + 2.0f};
             const Vec2 offset = Vec2{random() - 0.5f, random() - 0.5f} * (pop.size * 1.4f);
             const float life = kBitLife * (0.6f + 0.4f * random());
             bits_.push_back({pop.pos + offset, v, random() * 3.0f, (random() - 0.5f) * 12.0f, 0.04f + random() * pop.size * 0.14f, life, life,
-                             random() < 0.3f ? c.edge : c.fill});
+                             random() < 0.3f ? c.edge : c.fill, shape});
         }
         points_.push_back({pop.pos + Vec2{0, pop.size + 0.2f}, pop.points, kPointsLife, pop.kind == Kind::Pig ? color::kGood : color::kText});
     }
@@ -99,6 +106,12 @@ void Effects::update(const Level& level, float dt) {
         }
     }
     std::erase_if(bits_, [](const Bit& b) { return b.life <= 0; });
+    for (Puff& p : puffs_) {
+        p.p.y += 0.6f * dt;
+        p.size += 0.8f * dt;
+        p.life -= dt;
+    }
+    std::erase_if(puffs_, [](const Puff& p) { return p.life <= 0; });
     for (Points& p : points_) {
         p.p.y += 0.9f * dt;
         p.life -= dt;
@@ -127,9 +140,17 @@ void Effects::draw_over(SDL_Renderer* ren, const Level& level, float top_of_view
         SDL_Color c = b.color;
         c.a = static_cast<Uint8>(std::clamp(b.life / (b.max_life * 0.4f), 0.0f, 1.0f) * static_cast<float>(c.a));
         const Vec2 ax{std::cos(b.angle) * b.size, std::sin(b.angle) * b.size}, ay{-ax.y, ax.x};
-        const SDL_FPoint pts[4] = {to_screen(b.p - ax - ay), to_screen(b.p + ax - ay), to_screen(b.p + ax + ay), to_screen(b.p - ax + ay)};
+        if (b.shape == 2) {  // a shard: a thin triangle
+            const SDL_FPoint tri[3] = {to_screen(b.p + ax * 1.6f), to_screen(b.p - ax + ay * 0.5f), to_screen(b.p - ax - ay * 0.5f)};
+            fill_polygon(ren, tri, 3, c);
+            continue;
+        }
+        const Vec2 bx = b.shape == 1 ? ax * 2.5f : ax, by = b.shape == 1 ? ay * 0.4f : ay;  // a splinter is long and thin
+        const SDL_FPoint pts[4] = {to_screen(b.p - bx - by), to_screen(b.p + bx - by), to_screen(b.p + bx + by), to_screen(b.p - bx + by)};
         fill_polygon(ren, pts, 4, c);
     }
+    for (const Puff& p : puffs_)
+        fill_disc(ren, to_screen(p.p), to_pixels(p.size), {236, 240, 232, static_cast<Uint8>(std::clamp(p.life / 0.6f, 0.0f, 1.0f) * 150.0f)});
     for (const Points& p : points_) {
         SDL_Color c = p.color;
         c.a = static_cast<Uint8>(std::clamp(p.life / (kPointsLife * 0.5f), 0.0f, 1.0f) * 255.0f);

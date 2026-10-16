@@ -156,8 +156,9 @@ public:
     Real condition(size_t body) const;
     std::optional<Pig> pig_kind(size_t body) const;
     // `pull`: the bird is being held back in the sling right now. `wobble` moves where the empty
-    // bands meet (they quiver after a shot).
-    void overlay(Overlay& out, std::optional<Vec2> pull, Vec2 wobble = {}) const;
+    // bands meet (they quiver after a shot). With `sling` false the sling and the bird waiting in it
+    // are left out, for a caller that draws them itself.
+    void overlay(Overlay& out, std::optional<Vec2> pull, Vec2 wobble = {}, bool sling = true) const;
     std::vector<std::string> help() const;  // how to play, a line each
     std::string hint() const;               // what to do right now
     std::string stats() const;              // counters for the status bar

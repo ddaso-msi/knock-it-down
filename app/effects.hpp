@@ -34,7 +34,14 @@ private:
         Real angle, spin, size;
         float life, max_life;
         SDL_Color color;
+        int shape;  // 0 a chunk (stone), 1 a splinter (wood), 2 a shard (ice)
     };
+    struct Puff {  // smoke where a pig was
+        Vec2 p;
+        Real size;
+        float life;
+    };
+    std::vector<Puff> puffs_;
     struct Points {
         Vec2 p;
         int value;
