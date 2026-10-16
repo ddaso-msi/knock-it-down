@@ -40,6 +40,14 @@ No art: everything is drawn from plain shapes. The names and the look are our ow
   known to solve the level), taken from the solver's winning tries. Two stars is one bird's bonus
   less, and any win is one star.
 
+What you see on top of the physics is only drawn: the simulation and the recorded solutions are
+untouched by it.
+- Popped pieces burst into debris in their own colours, and their points float up.
+- The last bird's path stays on screen as dots (the one before it fainter), to aim the next by.
+- A bird above the top of the screen shows as a marker under the bar, with its height.
+- The winning pop plays in slow motion. Each bird left over counts up from the sling, then the
+  win panel appears.
+
 Round things have a little rolling resistance, which the engine itself does not model. Without it, a
 pig on a plank tilted by a tenth of a degree rolls off in time.
 

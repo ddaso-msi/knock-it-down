@@ -67,6 +67,7 @@ void Level::reset() {
     shots.clear();
     shot_ammo_.clear();
     flashes_.clear();
+    pops.clear();
     fuses_.clear();
     flying_ = -1;
     build();
@@ -232,7 +233,10 @@ void Level::pop(int body) {
     } else {
         score += material_props(piece.material).points;
     }
-    flashes_.push_back({world.bodies[static_cast<size_t>(body)].pos, sim_time, piece.kind == Kind::Pig ? 0.9f : 0.5f});
+    const Vec2 at = world.bodies[static_cast<size_t>(body)].pos;
+    flashes_.push_back({at, sim_time, piece.kind == Kind::Pig ? 0.9f : 0.5f});
+    const int points = piece.kind == Kind::Pig ? pig_props(piece.pig).points : material_props(piece.material).points;
+    pops.push_back({at, points, piece.kind, piece.material, piece.radius > 0 ? piece.radius : std::max(piece.half.x, piece.half.y), sim_time});
     remove(body);
 }
 
@@ -514,9 +518,9 @@ std::string Level::hint() const {
     if (shots_left() == 0) return "Last bird away. Watch what it does.";
     if (!can_fire()) return "Reloading...";
     const Ammo next = *next_ammo();
-    if (next == Ammo::Ball) return "Drag the bird back from the sling and let go.";
+    if (next == Ammo::Ball) return "Drag the bird back and let go.";
     if (!has_power(next)) return std::string("Next: ") + ammo_props(next).name + ". Drag it back and let go.";
-    return std::string("Next: ") + ammo_props(next).name + ". Click in flight to " + ammo_props(next).power + ".";
+    return std::string("Next: ") + ammo_props(next).name + ". Click in flight: " + ammo_props(next).power + ".";
 }
 
 std::string Level::stats() const {

@@ -41,7 +41,7 @@ add_subdirectory(tests)
 
 find_package(SDL3 CONFIG QUIET)
 if(SDL3_FOUND)
-  add_executable(knock_it_down app/main.cpp app/render.cpp app/scene.cpp)
+  add_executable(knock_it_down app/main.cpp app/render.cpp app/scene.cpp app/effects.cpp)
   target_link_libraries(knock_it_down PRIVATE kid_game SDL3::SDL3)
 else()
   message(STATUS "SDL3 not found, skipping the game itself")

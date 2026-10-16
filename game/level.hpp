@@ -74,6 +74,17 @@ public:
                                     // birds and a dropper's egg are extra bodies of the same shot)
     int pigs_left = 0;
 
+    // Every pop this attempt, in order, for whoever draws the game (debris, the points floating up).
+    struct Pop {
+        Vec2 pos;
+        int points;
+        Kind kind;
+        Material material;
+        Real size;    // roughly how big it was, in metres
+        double time;  // sim_time
+    };
+    std::vector<Pop> pops;
+
     explicit Level(Layout layout);
 
     const Layout& layout() const { return layout_; }

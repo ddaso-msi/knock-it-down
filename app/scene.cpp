@@ -1,5 +1,7 @@
 #include "scene.hpp"
 
+#include "effects.hpp"
+
 #include <algorithm>
 #include <cmath>
 #include <optional>
@@ -67,6 +69,12 @@ RoleColors with_material(RoleColors c, Material m) {
     return c;
 }
 
+}  // namespace
+
+RoleColors body_colors(Role role, Material m) { return role == Role::Block ? with_material(role_colors(role), m) : role_colors(role); }
+
+namespace {
+
 // Lines across a damaged body: one below two thirds of its health, two below a third.
 void draw_cracks(SDL_Renderer* ren, const Body& b, Real condition) {
     if (condition > 0.66f) return;
@@ -118,8 +126,9 @@ void ring(SDL_Renderer* ren, Vec2 centre, Real radius, SDL_Color c) {
 
 }  // namespace
 
-void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull, bool show_contacts) {
+void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull, bool show_contacts, const Effects* fx) {
     draw_grid(ren);
+    if (fx) fx->draw_under(ren);
     Overlay marks;
     level.overlay(marks, pull);
 
@@ -127,7 +136,7 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
     for (size_t i = 0; i < world.bodies.size(); ++i) {
         const Role r = level.role(i);
         if (r == Role::Hidden) continue;
-        RoleColors c = r == Role::Block ? with_material(role_colors(r), level.material(i)) : role_colors(r);
+        RoleColors c = body_colors(r, level.material(i));
         const Real condition = level.condition(i);
         if (condition < 0.34f) c.fill = mix(c.fill, {50, 40, 34, c.fill.a}, 0.35f);  // nearly gone: darker
         draw_body(ren, world.bodies[i], c.fill, c.edge);

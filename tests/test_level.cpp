@@ -230,6 +230,13 @@ TEST(a_popped_piece_is_gone_and_scores) {
     CHECK(g.role(static_cast<size_t>(lower)) == Role::Hidden);
     CHECK(g.world.bodies[static_cast<size_t>(lower)].mask == 0);
     CHECK(g.score == material_props(Material::Wood).points);
+    // And it is logged for the app to draw: where, how many points, what it was.
+    CHECK(g.pops.size() == 1);
+    CHECK(g.pops[0].points == material_props(Material::Wood).points);
+    CHECK(g.pops[0].kind == Kind::Block && g.pops[0].material == Material::Wood);
+    CHECK_NEAR(g.pops[0].pos.x, 14.0, 0.05);
+    CHECK_NEAR(g.pops[0].size, 0.35, 1e-6);
+    CHECK(g.pops[0].time == g.sim_time);
     // What it held up falls through where it was.
     const Real y0 = g.world.bodies[static_cast<size_t>(upper)].pos.y;
     run(g, 1.0);
@@ -686,5 +693,6 @@ TEST(reset_restores_the_level_and_counts_attempts) {
     g.reset();
     CHECK(g.attempt == 2);
     CHECK(g.shots.empty() && g.shots_left() == 3 && g.status == Status::Playing && g.sim_time == 0 && g.score == 0);
+    CHECK(g.pops.empty());
     CHECK(same_state(g, fresh));
 }

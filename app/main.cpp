@@ -18,6 +18,7 @@
 //   --steps N          advance the simulation N fixed steps
 //   --key NAME         reset, pause, help, contacts, next, escape
 //   --capture FILE     draw the current frame and save it as a BMP
+#include "effects.hpp"
 #include "render.hpp"
 #include "scene.hpp"
 
@@ -44,6 +45,8 @@ namespace {
 constexpr float kBarHeight = 88.0f;
 constexpr float kFooterTop = static_cast<float>(kHeight) - kFloorTop * kPixelsPerMeter;
 constexpr int kColumns = 5;
+// When the last pig pops, the game runs at kSlowSpeed for kSlowTime seconds before the win panel.
+constexpr float kSlowTime = 1.4f, kSlowSpeed = 0.3f;
 
 enum class Action { None, Reset, Pause, Help, Menu, Next, Contacts };
 
@@ -58,6 +61,9 @@ struct App {
     phys::FixedTimestep timestep{kTimeStep};
     Progress progress;
     std::optional<Vec2> pull;      // a bird is being held back in the sling: by this much
+    Effects fx;
+    float slow = 0;                // seconds of slow motion still to go
+    bool scripted = false;         // the scripted run: every update is exactly one step, never slowed
     std::string save_path;         // empty: do not save (script mode)
     bool recorded = false;         // this attempt's win is already in `progress`
 };
@@ -108,6 +114,8 @@ void start_level(App& app, int index) {
     app.index = index;
     app.paused = app.show_help = app.recorded = false;
     app.pull.reset();
+    app.fx.clear();
+    app.slow = 0;
     app.timestep = phys::FixedTimestep(kTimeStep);
 }
 
@@ -123,6 +131,8 @@ void apply(App& app, Action action) {
             level.reset();
             app.paused = app.recorded = false;
             app.pull.reset();
+            app.fx.clear();
+            app.slow = 0;
             app.timestep = phys::FixedTimestep(kTimeStep);
             break;
         case Action::Pause: app.paused = !app.paused; break;
@@ -230,9 +240,17 @@ void handle_event(App& app, const SDL_Event& e) {
 void update(App& app, phys::Real frame_seconds) {
     // Paused, on the menu or reading the help: bank no time, so play resumes exactly where it stopped.
     if (!app.level || app.paused || app.show_help) return;
-    app.timestep.advance(frame_seconds, [&](phys::Real) { app.level->step(); });
+    const float speed = app.slow > 0 && !app.scripted ? kSlowSpeed : 1.0f;
+    app.slow = std::max(0.0f, app.slow - frame_seconds);
+    app.timestep.advance(frame_seconds * speed, [&](phys::Real) { app.level->step(); });
+    app.fx.update(*app.level, frame_seconds * speed);
     if (app.level->status == Status::Won && !app.recorded) {
         app.recorded = true;
+        app.slow = kSlowTime;
+        // The birds left over each count up from the sling.
+        const Level& level = *app.level;
+        for (int i = 0; i < level.shots_left(); ++i)
+            app.fx.bird_bonus(level.layout().pouch + Vec2{0, 1.0f + 0.6f * static_cast<float>(i)}, Level::kBirdBonus);
         if (app.progress.record(app.level->name(), app.level->stars(), app.level->score)) save_progress(app);
     }
 }
@@ -289,11 +307,18 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
     // The floor strip doubles as a footer: what to do now on the left, the counters on the right.
     const std::string hint = level.hint();
     text(ren, 48.0f, kFooterTop + 8.0f, 2.0f, color::kText, "%s", hint.c_str());
+    // The counters on the right, as many as fit beside the hint: the time goes first, then the best score.
     const Best best = app.progress.best(level.name());
-    char counters[96];
     const int three = level.layout().stars.three;
-    if (best.stars > 0) SDL_snprintf(counters, sizeof(counters), "3 stars %d   Best %d   Try %d   %5.1f s", three, best.score, level.attempt, level.sim_time);
-    else SDL_snprintf(counters, sizeof(counters), "3 stars %d   Try %d   %5.1f s", three, level.attempt, level.sim_time);
+    char counters[96];
+    const float room = width - 96.0f - text_width(hint.c_str(), 2.0f) - 32.0f;
+    for (int detail = 2; detail >= 0; --detail) {
+        int n = SDL_snprintf(counters, sizeof(counters), "3 stars %d", three);
+        if (detail >= 1 && best.stars > 0) n += SDL_snprintf(counters + n, sizeof(counters) - static_cast<size_t>(n), "   Best %d", best.score);
+        n += SDL_snprintf(counters + n, sizeof(counters) - static_cast<size_t>(n), "   Try %d", level.attempt);
+        if (detail >= 2) SDL_snprintf(counters + n, sizeof(counters) - static_cast<size_t>(n), "   %5.1f s", level.sim_time);
+        if (text_width(counters, 2.0f) <= room) break;
+    }
     text(ren, width - 48.0f - text_width(counters, 2.0f), kFooterTop + 8.0f, 2.0f, color::kDim, "%s", counters);
 
     if (app.show_help) {
@@ -322,7 +347,7 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
             text(ren, r.x + 40.0f, y, 2.0f, color::kDim, "%s", l);
             y += 30.0f;
         }
-    } else if (level.status == Status::Won) {
+    } else if (level.status == Status::Won && app.slow <= 0) {
         const SDL_FRect r{cx - 360.0f, 140.0f, 720.0f, 170.0f};
         draw_panel(ren, r, color::kGood);
         text_centered(ren, cx, r.y + 14.0f, 4.0f, color::kGood, "SOLVED!");
@@ -370,7 +395,8 @@ void draw(SDL_Renderer* ren, const App& app) {
         draw_menu(ren, app);
         return;
     }
-    draw_level(ren, *app.level, app.paused || app.show_help ? std::nullopt : app.pull, app.show_contacts);
+    draw_level(ren, *app.level, app.paused || app.show_help ? std::nullopt : app.pull, app.show_contacts, &app.fx);
+    app.fx.draw_over(ren, *app.level, to_world(0, kBarHeight).y);
     draw_hud(ren, app);
 }
 
@@ -436,6 +462,7 @@ int main(int argc, char** argv) {
     App app;
     int result = 0;
     if (argc > 1) {
+        app.scripted = true;
         result = run_script(app, renderer, argc, argv) ? 0 : 1;
     } else {
         load_progress(app);
