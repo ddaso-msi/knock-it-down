@@ -106,8 +106,78 @@ Layout bunker() {
     return l;
 }
 
+// 7. A row of ice rooms. The triple splits into three, and each one is murder on ice.
+Layout ice_palace() {
+    Layout l;
+    l.name = "Ice Palace";
+    l.objective = "Pop every pig in the palace.";
+    l.notes = {"Teal birds are triples: click in flight and they split in three.",
+               "Triples are three times as hard on ice, and soft on wood and stone."};
+    l.ammo = {Split, Split, Ball};
+    l.par = 1;
+    for (const Real x : {12.0f, 13.9f, 15.8f}) {
+        pig(l, Small, x, kGround);
+        const Real top = frame(l, Ice, x, kGround, 1.2f, 1.1f);
+        if (x != 13.9f) pig(l, Small, x, top);
+    }
+    return l;
+}
+
+// 8. Pigs behind a thick wooden wall. A dart dashes, and wood is no match for it.
+Layout timber_yard() {
+    Layout l;
+    l.name = "Timber Yard";
+    l.objective = "Break through the timber wall.";
+    l.notes = {"Gold birds are darts: click in flight and they dash forward, fast.",
+               "Darts are three times as hard on wood, and soft on stone."};
+    l.ammo = {Dart, Dart, Ball};
+    l.par = 2;
+    for (const Real x : {11.4f, 12.41f}) column(l, Wood, x, kGround, 3, {0.5f, 0.5f});  // big, tough blocks
+    pig(l, Small, 14.0f, kGround);
+    pig(l, Helmet, 15.4f, kGround);
+    const Real top = frame(l, Wood, 14.7f, kGround, 2.4f, 1.0f);
+    pig(l, Small, 14.7f, top);
+    return l;
+}
+
+// 9. Pigs in stone huts. Nothing thrown at them does much; an egg dropped on the roof does.
+Layout rooftops() {
+    Layout l;
+    l.name = "Rooftops";
+    l.objective = "Pop the pigs in the stone huts.";
+    l.notes = {"White birds are droppers: click in flight to drop an egg straight down.",
+               "The egg explodes where it lands, through the roof below it."};
+    l.ammo = {Dropper, Dropper, Dropper};
+    l.par = 2;
+    for (const Real x : {11.0f, 14.0f, 17.0f}) {
+        pig(l, Small, x, kGround);
+        frame(l, Stone, x, kGround, 1.0f, 0.9f);
+    }
+    return l;
+}
+
+// 10. Stone, wood and ice in one fort, and one bird for each.
+Layout mixed_flock() {
+    Layout l;
+    l.name = "Mixed Flock";
+    l.objective = "Pop all four pigs.";
+    l.notes = {"Each bird is best at something: heavy on stone, dart on wood, triple on ice."};
+    l.ammo = {Heavy, Dart, Split, Blast};
+    l.par = 2;
+    pig(l, Big, 14.5f, kGround);
+    Real y = frame(l, Stone, 14.5f, kGround, 1.6f, 1.2f);
+    pig(l, Helmet, 14.5f, y);
+    y = frame(l, Wood, 14.5f, y, 1.2f, 1.0f);
+    pig(l, Small, 14.5f, y);
+    Real ice = frame(l, Ice, 17.3f, kGround, 1.0f, 1.3f);
+    ice = frame(l, Ice, 17.3f, ice, 1.0f, 1.1f);
+    pig(l, Small, 17.3f, ice);
+    return l;
+}
+
 using Maker = Layout (*)();
-constexpr Maker kLevels[] = {first_pig, glass_house, wood_fort, stone_wall, two_towers, bunker};
+constexpr Maker kLevels[] = {first_pig,  glass_house, wood_fort, stone_wall, two_towers,
+                             bunker,     ice_palace,  timber_yard, rooftops, mixed_flock};
 
 }  // namespace
 

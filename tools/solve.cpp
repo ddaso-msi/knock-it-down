@@ -1,14 +1,14 @@
 // kid_solve: searches a level for winning shots. This is how every level is checked to be solvable, how
 // its par is found, and where the recorded solutions in tests/solutions.hpp come from.
 //
-//   kid_solve --level N [--depth D] [--beam K] [--angles A] [--speeds S] [--waits 0,0.5,1] [--detonate 0,0.2]
-//             [--ammo bbh]   (try other ammo: b ball, h heavy, x blast)
+//   kid_solve --level N [--depth D] [--beam K] [--angles A] [--speeds S] [--waits 0,0.5,1] [--powers 0,0.5,1]
+//             [--ammo bbh]   (try other birds: b basic, h heavy, x bomber, s triple, d dart, e dropper)
 //
 // A shot is a launch angle and speed. Every shot on an angle x speed grid is tried from the level's
 // start; the best K results (most pigs popped) are kept, and the grid is tried again from each of
 // them, up to D shots. Shot n+1 is fired once the scene is quiet again (or after 4 s), plus each of the
-// extra --waits (seconds), which matter in levels with moving parts. A blast either goes off when it
-// hits something, or `--detonate` seconds after firing (each value tried; 0 means on impact only).
+// extra --waits (seconds), which matter in levels with moving parts. A bird with a power uses it each
+// of `--powers` seconds after firing (each value tried; 0 means never: a bomber then goes off on impact).
 //
 // For every depth it prints how many grid shots win from the best state, and how many of those are
 // ROBUST: the four neighbouring grid shots win too, so a player who is a little off still wins. The
@@ -35,7 +35,7 @@ namespace {
 struct Shot {
     long step;   // the fixed step at which it is fired (counted from the level's start)
     Vec2 pull;   // the sling's pull, as Level::fire takes it
-    long detonate = -1;  // for a blast: the step at which it is set off, or -1 for on impact
+    long power = -1;     // the step at which the bird's power was used, or -1 for never
 };
 
 struct Node {
@@ -49,7 +49,7 @@ struct Options {
     int level = 1, depth = 9, beam = 6, angles = 91, speeds = 29;
     std::vector<Ammo> ammo;  // replaces the level's own, to ask "could it be done with these?"
     std::vector<double> waits{0};
-    std::vector<double> detonate{0};
+    std::vector<double> powers{0, 0.6, 0.8, 1.0, 1.2};
     Real angle_lo = -20, angle_hi = 70, speed_lo = 6, speed_hi = 20;
 };
 
@@ -78,18 +78,17 @@ bool wait_for_turn(Node& n, double extra) {
 }
 
 // Plays the shot and then on until the scene settles or the level decides.
-void play(Node& n, Vec2 pull, double detonate_after) {
+void play(Node& n, Vec2 pull, double power_after) {
     Shot s{n.steps, pull};
     n.level.fire(pull);
-    if (detonate_after > 0 && n.level.live_blast >= 0) s.detonate = n.steps + std::lround(detonate_after / static_cast<double>(kTimeStep));
+    if (power_after > 0 && n.level.power_ready()) s.power = n.steps + std::lround(power_after / static_cast<double>(kTimeStep));
     n.shots.push_back(s);
     const bool last = n.level.shots_left() == 0;
     for (int i = 0; i < 120 * 12 && n.level.status == Status::Playing; ++i) {
-        if (s.detonate == n.steps) n.level.detonate();
+        if (s.power == n.steps && !n.level.power()) n.shots.back().power = -1;  // too late: it had hit something
         advance(n);
-        if (!last && n.level.live_blast < 0 && n.level.since_last_shot() > 0.5 && n.level.quiet()) break;
+        if (!last && !n.level.blast_live() && !n.level.power_ready() && n.level.since_last_shot() > 0.5 && n.level.quiet()) break;
     }
-    if (n.level.live_blast >= 0) n.shots.back().detonate = -1;  // never went off in time: treat as on impact
 }
 
 double score(const Level& l) {
@@ -101,13 +100,22 @@ double score(const Level& l) {
     return (static_cast<double>(l.pigs.size()) - l.pigs_left) * 100.0 + hurt * 50.0 + l.score / 1000.0;
 }
 
+// A float as a C++ literal that reads back exactly: nine significant digits, always with a point.
+std::string literal(Real x) {
+    char buf[32];
+    std::snprintf(buf, sizeof(buf), "%.9g", static_cast<double>(x));
+    std::string out = buf;
+    if (out.find_first_of(".e") == std::string::npos) out += ".0";
+    return out + "f";
+}
+
 // Replays shots on their exact steps (as the tests do), then on until the level decides.
 Level replay(const Layout& layout, const std::vector<Shot>& shots) {
     Level g(layout);
     size_t next = 0;
     for (long step = 0; step < 120L * 60 && g.status == Status::Playing; ++step) {
         for (const Shot& s : shots)
-            if (s.detonate == step) g.detonate();
+            if (s.power == step) g.power();
         if (next < shots.size() && shots[next].step == step) g.fire(shots[next++].pull);
         g.step();
     }
@@ -151,12 +159,15 @@ Options parse(int argc, char** argv) {
         else if (!std::strcmp(a, "--angles")) o.angles = std::atoi(v);
         else if (!std::strcmp(a, "--speeds")) o.speeds = std::atoi(v);
         else if (!std::strcmp(a, "--waits")) o.waits = parse_list(v);
-        else if (!std::strcmp(a, "--detonate")) o.detonate = parse_list(v);
+        else if (!std::strcmp(a, "--powers")) o.powers = parse_list(v);
         else if (!std::strcmp(a, "--ammo")) {
             for (const char* p = v; *p; ++p)
                 if (*p == 'b') o.ammo.push_back(Ammo::Ball);
                 else if (*p == 'h') o.ammo.push_back(Ammo::Heavy);
                 else if (*p == 'x') o.ammo.push_back(Ammo::Blast);
+                else if (*p == 's') o.ammo.push_back(Ammo::Split);
+                else if (*p == 'd') o.ammo.push_back(Ammo::Dart);
+                else if (*p == 'e') o.ammo.push_back(Ammo::Dropper);
         }
         else if (!std::strcmp(a, "--angle-range")) { o.angle_lo = static_cast<Real>(std::atof(v)); o.angle_hi = static_cast<Real>(std::atof(argv[i + 2])); ++i; }
         else std::fprintf(stderr, "ignoring %s\n", a);
@@ -198,8 +209,8 @@ int main(int argc, char** argv) {
         size_t best_tried = 0;
         std::vector<Shot> best_solution;
         for (size_t b = 0; b < beam.size(); ++b) {
-            const bool blast = beam[b].level.next_ammo() == Ammo::Blast;
-            const std::vector<double> dets = blast ? o.detonate : std::vector<double>{0};
+            const std::optional<Ammo> next_bird = beam[b].level.next_ammo();
+            const std::vector<double> dets = next_bird && has_power(*next_bird) ? o.powers : std::vector<double>{0};
             std::vector<Trial> trials;
             for (int w = 0; w < static_cast<int>(o.waits.size()); ++w)
                 for (int det = 0; det < static_cast<int>(dets.size()); ++det)
@@ -253,7 +264,7 @@ int main(int argc, char** argv) {
         if (best_wins > 0) {
             std::printf("  solution:\n");
             for (const Shot& s : best_solution)
-                std::printf("    {%ld, {%.9gf, %.9gf}, %ld},\n", s.step, static_cast<double>(s.pull.x), static_cast<double>(s.pull.y), s.detonate);
+                std::printf("    {%ld, {%s, %s}, %ld},\n", s.step, literal(s.pull.x).c_str(), literal(s.pull.y).c_str(), s.power);
             std::printf("  that solution with every pull nudged up to 1 cm at random: %d of 100 win\n", jitter(layout, best_solution));
         }
         // Keep the best K distinct results for the next shot.

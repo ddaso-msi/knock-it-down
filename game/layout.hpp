@@ -39,16 +39,27 @@ struct PigProps {
 };
 PigProps pig_props(Pig p);
 
-// What the slingshot fires.
-//   Ball   the ordinary bird
-//   Heavy  bigger and five times the mass: it shoves stone where a ball bounces off
-//   Blast  goes off at the first thing it touches (or when clicked in flight), pushing everything near it away
-enum class Ammo { Ball, Heavy, Blast };
+// The birds. Each one but Basic and Heavy has a power, used by clicking while it is still in flight
+// and has not yet touched anything (see Level::power).
+//   Ball     "basic": no power
+//   Heavy    five times the mass of a basic bird; extra hard on stone
+//   Blast    "bomber": goes off at the first thing it touches, or when clicked, pushing and damaging
+//            everything within 2.5 m, even through walls
+//   Split    "triple": splits into three smaller birds fanned out; extra hard on ice
+//   Dart     dashes forward at Level::kDashSpeed; extra hard on wood
+//   Dropper  drops an egg straight down (a small blast) and shoots up and away
+enum class Ammo { Ball, Heavy, Blast, Split, Dart, Dropper };
 struct AmmoProps {
     const char* name;
+    const char* power;  // what a click does, for the hint line; empty if nothing
     Real radius, density, restitution, friction;
+    // Damage multipliers for what this bird hits (pigs always take damage as it comes).
+    Real vs_wood = 1, vs_ice = 1, vs_stone = 1;
 };
 AmmoProps ammo_props(Ammo a);
+bool has_power(Ammo a);
+// How hard this bird is on what it hits: a block of the given material, or a pig when `pig` is set.
+Real damage_factor(Ammo a, Material m, bool pig);
 
 enum class Kind { Block, Pig };
 

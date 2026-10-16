@@ -25,11 +25,22 @@ PigProps pig_props(Pig p) {
 
 AmmoProps ammo_props(Ammo a) {
     switch (a) {
-        case Ammo::Ball: return {"ball", 0.25f, 6.0f, 0.2f, 0.5f};
-        case Ammo::Heavy: return {"heavy", 0.33f, 18.0f, 0.1f, 0.5f};
-        case Ammo::Blast: return {"blast", 0.25f, 6.0f, 0.2f, 0.5f};
+        case Ammo::Ball: return {"basic", "", 0.25f, 6.0f, 0.2f, 0.5f};
+        case Ammo::Heavy: return {"heavy", "", 0.33f, 18.0f, 0.1f, 0.5f, 1, 1, 2};
+        case Ammo::Blast: return {"bomber", "explode", 0.25f, 6.0f, 0.2f, 0.5f};
+        case Ammo::Split: return {"triple", "split in three", 0.2f, 6.0f, 0.2f, 0.5f, 0.6f, 3, 0.5f};
+        case Ammo::Dart: return {"dart", "dash", 0.22f, 6.0f, 0.2f, 0.5f, 3, 1, 0.5f};
+        case Ammo::Dropper: return {"dropper", "drop an egg", 0.27f, 5.0f, 0.2f, 0.5f};
     }
-    return {"ball", 0.25f, 6.0f, 0.2f, 0.5f};
+    return {"basic", "", 0.25f, 6.0f, 0.2f, 0.5f};
+}
+
+bool has_power(Ammo a) { return ammo_props(a).power[0] != 0; }
+
+Real damage_factor(Ammo a, Material m, bool pig) {
+    if (pig) return 1;
+    const AmmoProps p = ammo_props(a);
+    return m == Material::Wood ? p.vs_wood : m == Material::Ice ? p.vs_ice : p.vs_stone;
 }
 
 void wall(Layout& l, Vec2 pos, Vec2 half, Real angle) { l.walls.push_back({pos, half, angle}); }

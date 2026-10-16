@@ -43,6 +43,18 @@ Body make_static(Vec2 pos, Vec2 half, Real angle = 0) {
 
 }  // namespace
 
+Role role_of(Ammo a) {
+    switch (a) {
+        case Ammo::Ball: return Role::Ball;
+        case Ammo::Heavy: return Role::Heavy;
+        case Ammo::Blast: return Role::Blast;
+        case Ammo::Split: return Role::Split;
+        case Ammo::Dart: return Role::Dart;
+        case Ammo::Dropper: return Role::Dropper;
+    }
+    return Role::Ball;
+}
+
 Level::Level(Layout layout) : layout_(std::move(layout)) { reset(); }
 
 void Level::reset() {
@@ -55,7 +67,8 @@ void Level::reset() {
     shots.clear();
     shot_ammo_.clear();
     flashes_.clear();
-    live_blast = -1;
+    fuses_.clear();
+    flying_ = -1;
     build();
 }
 
@@ -79,12 +92,14 @@ void Level::build() {
     for (const Wall& w : layout_.walls) world.add(make_static(w.pos, w.half, w.angle));
     piece_of_.assign(world.bodies.size(), -1);
     health.assign(world.bodies.size(), kNoHealth);
+    shot_of_.assign(world.bodies.size(), -1);
 
     for (size_t i = 0; i < layout_.pieces.size(); ++i) {
         const Piece& p = layout_.pieces[i];
         const int body = world.add(make_piece(p));
         piece_of_.push_back(static_cast<int>(i));
         health.push_back(starting_health(p));
+        shot_of_.push_back(-1);
         (p.kind == Kind::Pig ? pigs : blocks).push_back(body);
     }
     max_health_ = health;
@@ -145,12 +160,13 @@ void Level::step() {
     world.step(kTimeStep);
     sim_time += static_cast<double>(kTimeStep);
 
-    if (live_blast >= 0)  // a blast goes off at the first thing it touches
-        for (const phys::ContactPair& c : world.contacts())
-            if (!c.dormant && c.manifold.count > 0 && (c.a == live_blast || c.b == live_blast)) {
-                explode(live_blast);
-                break;
-            }
+    std::vector<std::uint8_t> touched(world.bodies.size(), 0);
+    for (const phys::ContactPair& c : world.contacts())
+        if (!c.dormant && c.manifold.count > 0) touched[static_cast<size_t>(c.a)] = touched[static_cast<size_t>(c.b)] = 1;
+    if (flying_ >= 0 && touched[static_cast<size_t>(flying_)]) flying_ = -1;  // a power is only for the flight
+    const std::vector<Fuse> fuses = fuses_;  // a blast goes off at the first thing it touches
+    for (const Fuse& f : fuses)
+        if (touched[static_cast<size_t>(f.body)]) explode(f);
     apply_damage(vel, spin);
     roll_drag();
     std::erase_if(flashes_, [&](const Flash& f) { return sim_time - f.time > kFlashTime; });
@@ -174,8 +190,15 @@ void Level::apply_damage(const std::vector<Vec2>& vel, const std::vector<Real>& 
             if (dot(va - vb, c.manifold.normal) > kDamageSpeed) impulse += p.normal_impulse;
         }
         if (impulse <= 0) continue;
-        hurt(c.a, impulse);
-        hurt(c.b, impulse);
+        // A bird is harder on some materials than others.
+        const auto factor = [&](size_t bird, size_t hit) {
+            const int shot = shot_of_[bird], p = piece_of_[hit];
+            if (shot < 0 || p < 0) return Real(1);
+            const Piece& piece = layout_.pieces[static_cast<size_t>(p)];
+            return damage_factor(shot_ammo_[static_cast<size_t>(shot)], piece.material, piece.kind == Kind::Pig);
+        };
+        hurt(c.a, impulse * factor(b, a));
+        hurt(c.b, impulse * factor(a, b));
     }
     for (size_t i = 0; i < health.size(); ++i)
         if (health[i] != kNoHealth && health[i] <= 0 && !popped(static_cast<int>(i))) pop(static_cast<int>(i));
@@ -224,6 +247,8 @@ void Level::remove(int index) {
     b.category = b.mask = 0;
     b.pos = {-10, -10};
     std::erase(watched_, index);
+    std::erase_if(fuses_, [&](const Fuse& f) { return f.body == index; });
+    if (flying_ == index) flying_ = -1;
     for (int j = static_cast<int>(world.joints.size()) - 1; j >= 0; --j) {
         const phys::Joint& joint = world.joints[static_cast<size_t>(j)];
         if (joint.a != index && joint.b != index) continue;
@@ -244,7 +269,7 @@ void Level::evaluate() {
     }
     const bool quiet_now = quiet();
     quiet_for_ = quiet_now ? quiet_for_ + static_cast<double>(kTimeStep) : 0;
-    if (shots_left() == 0 && live_blast < 0 && status == Status::Playing) {
+    if (shots_left() == 0 && !blast_live() && !power_ready() && status == Status::Playing) {
         const double since = since_last_shot();
         if ((quiet_for_ >= static_cast<double>(kQuietTime) && since >= static_cast<double>(kQuietTime)) ||
             since >= static_cast<double>(kSettleTime))
@@ -275,40 +300,97 @@ std::optional<Ammo> Level::next_ammo() const {
 }
 
 bool Level::can_fire() const {
-    if (status != Status::Playing || shots_left() <= 0 || live_blast >= 0) return false;
+    // Not while the last bird can still use its power: a click then means the power, not the sling.
+    if (status != Status::Playing || shots_left() <= 0 || blast_live() || power_ready()) return false;
     return shots.empty() || since_last_shot() >= static_cast<double>(kReloadTime);
+}
+
+int Level::add_bird(int shot, Ammo kind, Real radius, Vec2 pos, Vec2 vel) {
+    const AmmoProps a = ammo_props(kind);
+    Body bird(phys::Shape::make_circle(radius), pos, 0, phys::BodyType::Dynamic, a.density);
+    bird.restitution = a.restitution;
+    bird.friction = a.friction;
+    bird.vel = vel;
+    const int body = world.add(bird);
+    piece_of_.push_back(-1);
+    health.push_back(kNoHealth);
+    max_health_.push_back(kNoHealth);
+    shot_of_.push_back(shot);
+    watched_.push_back(body);
+    return body;
 }
 
 bool Level::fire(Vec2 pull) {
     pull = pull_to(layout_.pouch + pull);
     if (!can_fire() || pull.length() < kMinPull) return false;
     const Ammo kind = *next_ammo();
-    const AmmoProps a = ammo_props(kind);
-    Body shot(phys::Shape::make_circle(a.radius), launch_point(pull), 0, phys::BodyType::Dynamic, a.density);
-    shot.restitution = a.restitution;
-    shot.friction = a.friction;
-    shot.vel = launch_velocity(pull);
-    const int body = world.add(shot);
-    piece_of_.push_back(-1);
-    health.push_back(kNoHealth);
-    max_health_.push_back(kNoHealth);
-    watched_.push_back(body);
-    shots.push_back(body);
+    const int shot = static_cast<int>(shots.size());
     shot_ammo_.push_back(kind);
-    if (kind == Ammo::Blast) live_blast = body;
+    const int body = add_bird(shot, kind, ammo_props(kind).radius, launch_point(pull), launch_velocity(pull));
+    shots.push_back(body);
+    if (kind == Ammo::Blast) fuses_.push_back({body, kBlastRadius, kBlastImpulse, kBlastDamage});
+    flying_ = has_power(kind) ? body : -1;
     last_shot_time_ = sim_time;
     quiet_for_ = 0;
     tried_ = true;
     return true;
 }
 
-bool Level::detonate() {
-    if (live_blast < 0) return false;
-    explode(live_blast);
-    return true;
+bool Level::power_ready() const { return flying_ >= 0; }
+
+bool Level::power() {
+    if (!power_ready()) return false;
+    const int body = flying_;
+    flying_ = -1;
+    const int shot = shot_of_[static_cast<size_t>(body)];
+    const Ammo kind = shot_ammo_[static_cast<size_t>(shot)];
+    Body& b = world.bodies[static_cast<size_t>(body)];
+    const Vec2 p = b.pos, v = b.vel;
+    const Real speed = v.length();
+    const Vec2 heading = speed > 1e-4f ? v * (1 / speed) : Vec2{1, 0};
+    switch (kind) {
+        case Ammo::Blast:
+            for (const Fuse& f : fuses_)
+                if (f.body == body) {
+                    explode(Fuse(f));
+                    break;
+                }
+            return true;
+        case Ammo::Split: {
+            // Two more birds either side of this one, a little more than a diameter away so they start
+            // clear of it, all three at the same speed, fanned out.
+            const Real r = ammo_props(Ammo::Split).radius;
+            const Vec2 side = phys::perp(heading) * (2 * r + 0.05f);
+            for (const Real turn : {kSplitAngle, -kSplitAngle}) {
+                const Vec2 dir = rotate(phys::Rot(turn), heading);
+                add_bird(shot, kind, r, p + (turn > 0 ? side : side * -1.0f), dir * speed);
+            }
+            flashes_.push_back({p, sim_time, 0.5f});
+            return true;
+        }
+        case Ammo::Dart:
+            b.vel = heading * kDashSpeed;
+            b.wake();
+            flashes_.push_back({p, sim_time, 0.4f});
+            return true;
+        case Ammo::Dropper: {
+            const Real r = ammo_props(Ammo::Dropper).radius;
+            const int egg = add_bird(shot, kind, kEggRadius, p - Vec2{0, r + kEggRadius + 0.05f}, {0, -kEggSpeed});
+            fuses_.push_back({egg, kEggBlastRadius, kEggImpulse, kEggDamage});
+            const Real away = v.x >= 0 ? 1.0f : -1.0f;
+            b.vel = Vec2{away * std::cos(0.87f), std::sin(0.87f)} * kHopSpeed;
+            b.wake();
+            flashes_.push_back({p, sim_time, 0.5f});
+            return true;
+        }
+        case Ammo::Ball:
+        case Ammo::Heavy: break;
+    }
+    return false;
 }
 
-void Level::explode(int index) {
+void Level::explode(const Fuse& fuse) {
+    const int index = fuse.body;
     const Vec2 at = world.bodies[static_cast<size_t>(index)].pos;
     // Every dynamic body near the blast gets a kick away from it and some damage, both strongest close
     // in. Distance is to the nearest point of the body's box, so a long plank is hit when its end is close.
@@ -318,17 +400,16 @@ void Level::explode(int index) {
         const phys::AABB box = phys::compute_aabb(b);
         const Vec2 nearest{std::clamp(at.x, box.lo.x, box.hi.x), std::clamp(at.y, box.lo.y, box.hi.y)};
         const Real d = distance(at, nearest);
-        if (d >= kBlastRadius) continue;
-        const Real strength = 1 - d / kBlastRadius;
+        if (d >= fuse.radius) continue;
+        const Real strength = 1 - d / fuse.radius;
         Vec2 dir = b.pos - at;
         dir = dir.length() > 1e-4f ? dir.normalized() : Vec2{0, 1};
-        b.vel += dir * (kBlastImpulse * strength * b.inv_mass);
+        b.vel += dir * (fuse.impulse * strength * b.inv_mass);
         b.wake();
-        hurt(static_cast<int>(i), kBlastDamage * strength);
+        hurt(static_cast<int>(i), fuse.damage * strength);
     }
-    remove(index);  // the shot itself is spent
-    flashes_.push_back({at, sim_time, kBlastRadius});
-    live_blast = -1;
+    remove(index);  // the bomber or egg itself is spent (this also takes it off the fuse list)
+    flashes_.push_back({at, sim_time, fuse.radius});
     last_shot_time_ = sim_time;  // the settle clock starts from the explosion
     for (size_t i = 0; i < health.size(); ++i)
         if (health[i] != kNoHealth && health[i] <= 0 && !popped(static_cast<int>(i))) pop(static_cast<int>(i));
@@ -342,9 +423,11 @@ int Level::stars() const {
 
 Role Level::role(size_t body) const {
     if (popped(static_cast<int>(body))) return Role::Hidden;
-    for (size_t s = 0; s < shots.size(); ++s)
-        if (shots[s] == static_cast<int>(body))
-            return shot_ammo_[s] == Ammo::Heavy ? Role::Heavy : shot_ammo_[s] == Ammo::Blast ? Role::Blast : Role::Ball;
+    if (const int shot = shot_of(body); shot >= 0) {
+        const Ammo kind = shot_ammo_[static_cast<size_t>(shot)];
+        const bool egg = kind == Ammo::Dropper && shots[static_cast<size_t>(shot)] != static_cast<int>(body);  // not the dropper itself
+        return egg ? Role::Egg : role_of(kind);
+    }
     if (std::find(driven_.begin(), driven_.end(), static_cast<int>(body)) != driven_.end()) return Role::Driven;
     const int p = body < piece_of_.size() ? piece_of_[body] : -1;
     if (p < 0) return Role::Scenery;
@@ -382,8 +465,12 @@ void Level::overlay(Overlay& out, std::optional<Vec2> pull) const {
     const std::optional<Ammo> next = status == Status::Playing ? next_ammo() : std::nullopt;
     const Vec2 held = pull ? pull_to(pouch + *pull) : Vec2{};
     const Vec2 bird = launch_point(held);
+    if (power_ready()) {  // a ring round the bird in flight: click now
+        const Body& b = world.bodies[static_cast<size_t>(flying_)];
+        out.rings.push_back({b.pos, b.shape.circle.radius + 0.18f, 0.6f});
+    }
     if (next) {
-        const Role r = *next == Ammo::Heavy ? Role::Heavy : *next == Ammo::Blast ? Role::Blast : Role::Ball;
+        const Role r = role_of(*next);
         out.lines.push_back({back, bird, Role::Guide, false});
         out.dots.push_back({bird, ammo_props(*next).radius, can_fire() ? r : Role::Guide});
         out.lines.push_back({front, bird, Role::Guide, false});
@@ -420,13 +507,16 @@ std::vector<std::string> Level::help() const {
 std::string Level::hint() const {
     if (status == Status::Won) return "Solved.";
     if (status == Status::Failed) return "Out of birds. R to try again.";
-    if (live_blast >= 0) return "Click to set it off, or let it hit something.";
+    if (power_ready()) {
+        const Ammo kind = shot_ammo_[static_cast<size_t>(shot_of_[static_cast<size_t>(flying_)])];
+        return std::string("Click to ") + ammo_props(kind).power + "!";
+    }
     if (shots_left() == 0) return "Last bird away. Watch what it does.";
     if (!can_fire()) return "Reloading...";
     const Ammo next = *next_ammo();
-    if (next == Ammo::Heavy) return "Next: a heavy bird. Drag it back and let go.";
-    if (next == Ammo::Blast) return "Next: a blast bird. It goes off when it hits.";
-    return "Drag the bird back from the sling and let go.";
+    if (next == Ammo::Ball) return "Drag the bird back from the sling and let go.";
+    if (!has_power(next)) return std::string("Next: ") + ammo_props(next).name + ". Drag it back and let go.";
+    return std::string("Next: ") + ammo_props(next).name + ". Click in flight to " + ammo_props(next).power + ".";
 }
 
 std::string Level::stats() const {

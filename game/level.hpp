@@ -17,7 +17,8 @@ namespace kid {
 enum class Status { Playing, Won, Failed };
 
 // What a body (or a mark on the screen) means to the player. The app picks colours from this.
-enum class Role { Scenery, Driven, Block, Pig, Ball, Heavy, Blast, Hidden, Guide, Band };
+enum class Role { Scenery, Driven, Block, Pig, Ball, Heavy, Blast, Split, Dart, Dropper, Egg, Hidden, Guide, Band };
+Role role_of(Ammo a);  // how a bird of this kind is drawn
 
 // Marks the level wants drawn on top of the world, in world coordinates.
 struct Overlay {
@@ -44,6 +45,13 @@ public:
     static constexpr Real kQuietTime = 1.0f, kSettleTime = 8.0f;
     static constexpr Real kBlastRadius = 2.5f, kBlastImpulse = 8.0f;  // N s at the centre, none at the edge
     static constexpr Real kBlastDamage = 6.0f;  // health a blast takes from what is at its centre
+    // Powers. A dart dashes at kDashSpeed: 25 cm a step, still short of what a bird would need to get
+    // through the thinnest post in one step (its own radius plus the post's half width, 34 cm), since
+    // the engine's continuous collision does not cover moving bodies. A triple splits into three
+    // fanned kSplitAngle apart. A dropper's egg falls at kEggSpeed and is a small blast; the dropper
+    // itself leaves at kHopSpeed, up and away at 50 degrees (slow enough to stay on screen).
+    static constexpr Real kDashSpeed = 30.0f, kSplitAngle = 0.2f, kEggSpeed = 8.0f, kHopSpeed = 13.0f;
+    static constexpr Real kEggRadius = 0.2f, kEggBlastRadius = 1.6f, kEggImpulse = 5.0f, kEggDamage = 5.0f;
     // An impact only hurts when the two surfaces were closing faster than this: resting weight and
     // gentle nudges cost nothing, however heavy the stack.
     static constexpr Real kDamageSpeed = 1.0f;
@@ -62,9 +70,9 @@ public:
 
     std::vector<int> pigs, blocks;  // indices into world.bodies (popped ones stay listed)
     std::vector<Real> health;       // per body; only meaningful for pigs and breakable blocks
-    std::vector<int> shots;         // the body each shot became, in firing order
+    std::vector<int> shots;         // the body each shot became, in firing order (a triple's other two
+                                    // birds and a dropper's egg are extra bodies of the same shot)
     int pigs_left = 0;
-    int live_blast = -1;            // a blast shot still in flight, or -1
 
     explicit Level(Layout layout);
 
@@ -86,8 +94,16 @@ public:
     bool can_fire() const;
     // Fires the next bird with this pull if allowed (and long enough); returns whether one was launched.
     bool fire(Vec2 pull);
-    // Sets off the blast shot in flight, if there is one.
-    bool detonate();
+    // The latest bird's power can be used: it has one, it has not been used, and the bird has not yet
+    // touched anything.
+    bool power_ready() const;
+    // Uses it (explode, split, dash, drop an egg). Returns whether anything happened. This is what a
+    // click does while a bird is in flight.
+    bool power();
+    // Something is waiting to explode (a bomber in flight, an egg on its way down).
+    bool blast_live() const { return !fuses_.empty(); }
+    // Which shot a body came from (index into `shots`), or -1 for anything that is not a bird or an egg.
+    int shot_of(size_t body) const { return body < shot_of_.size() ? shot_of_[body] : -1; }
 
     int shots_used() const { return static_cast<int>(shots.size()); }
     int shots_left() const { return static_cast<int>(layout_.ammo.size()) - shots_used(); }
@@ -123,6 +139,10 @@ private:
         double time;
         Real radius;
     };
+    struct Fuse {  // something that explodes at the first thing it touches
+        int body;
+        Real radius, impulse, damage;
+    };
 
     void build();
     void apply_damage(const std::vector<Vec2>& vel, const std::vector<Real>& spin);
@@ -131,7 +151,8 @@ private:
     void pop(int body);
     void remove(int body);
     void evaluate();
-    void explode(int body);
+    void explode(const Fuse& f);
+    int add_bird(int shot, Ammo kind, Real radius, Vec2 pos, Vec2 vel);
 
     Layout layout_;
     std::vector<int> piece_of_;  // for each body, its index in layout_.pieces, or -1
@@ -141,6 +162,9 @@ private:
     std::vector<Drive> drives_;
     std::vector<Flash> flashes_;
     std::vector<Ammo> shot_ammo_;  // per shot
+    std::vector<int> shot_of_;     // per body: see shot_of()
+    std::vector<Fuse> fuses_;
+    int flying_ = -1;              // the latest bird while its power is still ready, else -1
     double last_shot_time_ = 0;
     double quiet_for_ = 0;
     bool tried_ = false;

@@ -3,6 +3,9 @@
 
 #include <level.hpp>
 
+#include <phys/collision.hpp>
+
+#include <algorithm>
 #include <cmath>
 
 using namespace kid;
@@ -30,8 +33,8 @@ Layout one_pig(std::vector<Ammo> ammo = {Ammo::Ball, Ammo::Ball, Ammo::Ball}) {
 }
 Layout empty_level(std::vector<Ammo> ammo = {Ammo::Ball, Ammo::Ball, Ammo::Ball}) { return one_pig(std::move(ammo)); }
 
-int body_of_piece(const Level& g, int piece) {  // pieces come after the scenery and before any shot
-    return static_cast<int>(g.world.bodies.size() - g.layout().pieces.size() - g.shots.size()) + piece;
+int body_of_piece(const Level& g, int piece) {  // the room's four walls, the layout's walls, then the pieces
+    return 4 + static_cast<int>(g.layout().walls.size()) + piece;
 }
 
 // Moves a body by hand (as if something had knocked it there), with this velocity, and wakes it.
@@ -357,9 +360,9 @@ TEST(a_blast_goes_off_on_impact_and_pushes_and_damages_whats_near) {
     const int blast = g.shots[0];
     g.world.bodies[static_cast<size_t>(blast)].pos = {10.0f, 1.2f};
     g.world.bodies[static_cast<size_t>(blast)].vel = {0, -4.0f};
-    CHECK(g.live_blast == blast);
-    for (int i = 0; i < 60 && g.live_blast >= 0; ++i) g.step();
-    CHECK(g.live_blast < 0);
+    CHECK(g.blast_live());
+    for (int i = 0; i < 60 && g.blast_live(); ++i) g.step();
+    CHECK(!g.blast_live());
     CHECK(g.world.bodies[left].vel.x < -1.0f);
     CHECK(g.world.bodies[right].vel.x > 1.0f);
     CHECK(std::fabs(g.world.bodies[left].vel.x + g.world.bodies[right].vel.x) < 0.1f);  // equal and opposite
@@ -386,15 +389,15 @@ TEST(a_blast_is_stronger_close_in_and_can_be_set_off_in_flight) {
     blast.pos = {9.8f, 3.0f};
     blast.vel = {};
     run(g, static_cast<double>(Level::kReloadTime) + 0.1);
-    CHECK(g.live_blast == g.shots[0]);
+    CHECK(g.blast_live() && g.power_ready());
     CHECK(!g.can_fire());  // reloaded, but a blast is still in flight
-    CHECK(g.detonate());
-    CHECK(g.live_blast < 0);
+    CHECK(g.power());
+    CHECK(!g.blast_live());
     const Real v_near = g.world.bodies[near].vel.length(), v_far = g.world.bodies[farther].vel.length();
     CHECK(v_near > 2.0f * v_far);
     CHECK(v_far > 0.1f);
     CHECK(g.condition(near) < g.condition(farther));
-    CHECK(!g.detonate());  // nothing left to set off
+    CHECK(!g.power());  // nothing left to set off
     CHECK(!g.can_fire());  // an explosion restarts the reload, like a shot
     run(g, static_cast<double>(Level::kReloadTime) + 0.05);
     CHECK(g.can_fire());
@@ -416,11 +419,165 @@ TEST(the_settle_clock_restarts_when_a_late_blast_goes_off) {
     run(g, 7.5);
     CHECK(g.status == Status::Playing);
     g.world.gravity = {0, -9.81f};
-    CHECK(g.detonate());
+    CHECK(g.power());
     run(g, 0.7);  // 8.2 s after firing, but the disc is still rolling
     CHECK(g.status == Status::Playing);
     for (int i = 0; i < 120 * 10 && g.status == Status::Playing; ++i) g.step();
     CHECK(g.status == Status::Failed);
+}
+
+// ---- powers ----
+
+namespace {
+
+// Fires the next bird and puts it at `p` with velocity `v`, in flight and untouched.
+int launch(Level& g, Vec2 p, Vec2 v) {
+    CHECK(g.fire(g.pull_for(0.5f, 10.0f)));
+    const int b = g.shots.back();
+    g.world.bodies[static_cast<size_t>(b)].pos = p;
+    g.world.bodies[static_cast<size_t>(b)].vel = v;
+    return b;
+}
+
+// How much health a bird of kind `a` at `speed` takes off one block of material `m` in a head-on hit.
+// The block is a big one, so no bird breaks it outright and the numbers can be compared.
+Real damage_done(Ammo a, Material m, Real speed) {
+    Layout l = one_pig({a});
+    const int piece = block(l, m, {14.0f, 1.101f}, {0.6f, 0.6f});
+    Level g(l);
+    run(g, 0.3);
+    launch(g, {12.9f, 1.1f}, {speed, 0});  // just short of the block
+    const int b = body_of_piece(g, piece);
+    const Real before = g.health[static_cast<size_t>(b)];
+    run(g, 0.3);
+    CHECK(!g.popped(b));
+    return before - g.health[static_cast<size_t>(b)];
+}
+
+}  // namespace
+
+TEST(basic_and_heavy_birds_have_no_power) {
+    Level g(one_pig({Ammo::Ball, Ammo::Heavy}));
+    launch(g, {8.0f, 6.0f}, {5.0f, 0});
+    CHECK(!g.power_ready());
+    CHECK(!g.power());
+    run(g, 0.5);
+    CHECK(g.can_fire());
+    launch(g, {8.0f, 6.0f}, {5.0f, 0});
+    CHECK(!g.power_ready());
+}
+
+TEST(a_power_is_for_the_flight_only_and_holds_the_sling_till_then) {
+    Level g(one_pig({Ammo::Dart, Ammo::Dart, Ammo::Ball}));
+    launch(g, {8.0f, 8.0f}, {3.0f, 0});
+    CHECK(g.power_ready());
+    run(g, static_cast<double>(Level::kReloadTime) + 0.1);
+    CHECK(g.power_ready());
+    CHECK(!g.can_fire());  // a click now means the power, not the next bird
+    for (int i = 0; i < 300 && g.power_ready(); ++i) g.step();  // it lands
+    CHECK(!g.power_ready());
+    CHECK(!g.power());  // too late: it has hit something
+    CHECK(g.can_fire());
+    launch(g, {8.0f, 8.0f}, {3.0f, 0});
+    CHECK(g.power());
+    CHECK(!g.power());  // once only
+    CHECK(!g.power_ready());
+}
+
+TEST(a_triple_splits_into_three_at_the_same_speed_fanned_out) {
+    Level g(one_pig({Ammo::Split}));
+    const size_t before = g.world.bodies.size();
+    const Vec2 v{8.0f, 3.0f};
+    const int bird = launch(g, {8.0f, 6.0f}, v);
+    CHECK(g.power());
+    CHECK(g.world.bodies.size() == before + 3);
+    CHECK(g.shots_used() == 1);  // still one bird from the sling
+    const Real heading = std::atan2(v.y, v.x);
+    std::vector<Real> angles;
+    for (size_t b = before; b < g.world.bodies.size(); ++b) {
+        CHECK(g.shot_of(b) == 0);
+        CHECK(g.role(b) == Role::Split);
+        CHECK_NEAR(g.world.bodies[b].vel.length(), v.length(), 1e-4);
+        angles.push_back(std::atan2(g.world.bodies[b].vel.y, g.world.bodies[b].vel.x) - heading);
+        for (size_t c = before; c < b; ++c) {  // and none of them overlap
+            phys::Manifold m;
+            CHECK(!phys::collide(g.world.bodies[b], g.world.bodies[c], m));
+        }
+    }
+    std::sort(angles.begin(), angles.end());
+    CHECK_NEAR(angles[0], -Level::kSplitAngle, 1e-4);
+    CHECK_NEAR(angles[1], 0, 1e-4);
+    CHECK_NEAR(angles[2], Level::kSplitAngle, 1e-4);
+    CHECK(g.world.bodies[static_cast<size_t>(bird)].vel.x == v.x);  // the original carries straight on
+}
+
+TEST(a_dart_dashes_along_its_heading) {
+    Level g(one_pig({Ammo::Dart}));
+    const int bird = launch(g, {8.0f, 6.0f}, {6.0f, 8.0f});
+    CHECK(g.power());
+    const Vec2 v = g.world.bodies[static_cast<size_t>(bird)].vel;
+    CHECK_NEAR(v.length(), Level::kDashSpeed, 1e-4);
+    CHECK_NEAR(v.x / v.length(), 0.6, 1e-5);
+    CHECK_NEAR(v.y / v.length(), 0.8, 1e-5);
+}
+
+TEST(a_dart_at_full_dash_does_not_pass_through_the_thinnest_post) {
+    // The engine sweeps fast bodies only against static ones, so this is the bound kDashSpeed was
+    // chosen for: a dart cannot cross a 24 cm post in one step. Tried at a spread of heights.
+    for (int k = 0; k < 9; ++k) {
+        Layout l = one_pig({Ammo::Dart});
+        const int p = post(l, Material::Wood, 12.0f, kFloorTop, 3.0f, 0.12f);
+        l.pieces[static_cast<size_t>(p)].breakable = false;
+        Level g(l);
+        // As good as immovable, but still a moving body, so the engine does not sweep against it: a
+        // light post would just be knocked over, and that is not what is being tested.
+        Body& wall = g.world.bodies[static_cast<size_t>(body_of_piece(g, p))];
+        wall.inv_mass = wall.inv_inertia = 1e-6f;
+        run(g, 0.2);
+        const int bird = launch(g, {10.0f + 0.013f * static_cast<Real>(k), 1.0f + 0.25f * static_cast<Real>(k)}, {8.0f, 0});
+        g.world.gravity = {};
+        CHECK(g.power());
+        run(g, 0.3);
+        CHECK(g.world.bodies[static_cast<size_t>(bird)].pos.x < 12.0f);
+    }
+}
+
+TEST(each_bird_is_hardest_on_its_own_material) {
+    // Same speed, same block: a dart is far harder on wood than a basic bird, a triple on ice, a heavy
+    // on stone; and a dart or a triple is softer on stone.
+    const Real speed = 3.0f;
+    CHECK(damage_done(Ammo::Dart, Material::Wood, speed) > 2 * damage_done(Ammo::Ball, Material::Wood, speed));
+    CHECK(damage_done(Ammo::Split, Material::Ice, speed) > 1.5f * damage_done(Ammo::Ball, Material::Ice, speed));
+    CHECK(damage_done(Ammo::Heavy, Material::Stone, speed) > 2 * damage_done(Ammo::Ball, Material::Stone, speed));
+    CHECK(damage_done(Ammo::Dart, Material::Stone, speed) < damage_done(Ammo::Ball, Material::Stone, speed));
+    CHECK(damage_done(Ammo::Split, Material::Stone, speed) < damage_done(Ammo::Ball, Material::Stone, speed));
+    for (const Ammo a : {Ammo::Ball, Ammo::Heavy, Ammo::Blast, Ammo::Split, Ammo::Dart, Ammo::Dropper})
+        for (const Material m : {Material::Wood, Material::Ice, Material::Stone}) CHECK(damage_factor(a, m, true) == 1.0f);  // pigs: as it comes
+}
+
+TEST(a_dropper_drops_an_egg_that_explodes_where_it_lands) {
+    Layout l = one_pig({Ammo::Dropper});
+    const int under = pig(l, Pig::Small, 12.0f, kFloorTop);
+    frame(l, Material::Stone, 12.0f, kFloorTop, 1.0f, 0.9f);  // a stone hut round it
+    Level g(l);
+    run(g, 0.3);
+    const size_t before = g.world.bodies.size();
+    const int bird = launch(g, {12.0f, 6.0f}, {6.0f, 0});
+    CHECK(g.power());
+    CHECK(g.world.bodies.size() == before + 2);
+    const size_t egg = before + 1;
+    CHECK(g.role(egg) == Role::Egg);
+    CHECK(g.world.bodies[egg].pos.y < g.world.bodies[static_cast<size_t>(bird)].pos.y);
+    CHECK_NEAR(g.world.bodies[egg].vel.y, -Level::kEggSpeed, 1e-5);
+    const Vec2 hop = g.world.bodies[static_cast<size_t>(bird)].vel;
+    CHECK_NEAR(hop.length(), Level::kHopSpeed, 1e-4);
+    CHECK(hop.x > 0 && hop.y > 0);  // up and away, the way it was going
+    CHECK(g.blast_live());
+    CHECK(!g.can_fire());
+    for (int i = 0; i < 120 && g.blast_live(); ++i) g.step();
+    CHECK(!g.blast_live());
+    CHECK(g.role(egg) == Role::Hidden);
+    CHECK(g.popped(body_of_piece(g, under)));  // through the roof
 }
 
 // ---- joints ----
@@ -470,7 +627,7 @@ TEST(a_popped_piece_lets_go_of_its_rope_and_the_other_ropes_still_hold) {
     // A blast set off right under the first piece shatters it; the second is out of its reach.
     CHECK(g.fire(g.pull_for(0.0f, 4.0f)));
     g.world.bodies[static_cast<size_t>(g.shots[0])].pos = {8.0f, 5.4f};
-    CHECK(g.detonate());
+    CHECK(g.power());
     CHECK(g.popped(ba));
     CHECK(g.world.joints.size() == 1);
     CHECK(g.world.joints[0].b == bb);
@@ -491,7 +648,7 @@ TEST(a_slider_keeps_swinging_after_a_piece_jointed_before_it_pops) {
     Level g(l);
     CHECK(g.fire(g.pull_for(0.0f, 4.0f)));
     g.world.bodies[static_cast<size_t>(g.shots[0])].pos = {6.0f, 5.4f};
-    CHECK(g.detonate());
+    CHECK(g.power());
     CHECK(g.popped(body_of_piece(g, roped)));
     CHECK(g.world.joints.size() == 1);
     const size_t d = static_cast<size_t>(body_of_piece(g, deck));

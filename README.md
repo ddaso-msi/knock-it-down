@@ -19,11 +19,22 @@ No art: everything is drawn from plain shapes. The names and the look are our ow
   scales with a block's size.
 - **Pigs.** A small pig pops from a fall of about a metre. A helmet pig takes a few hits. A big pig
   survives any single bird head-on.
-- **Birds** (powers come in stage 2):
-  - ball: the ordinary bird;
-  - heavy: five times the mass;
-  - blast: explodes on impact or when clicked, pushing and damaging everything within 2.5 m, even
-    through walls.
+- **Birds.** A power is used by clicking anywhere while the bird is still in flight, before it first
+  touches anything. Until then the sling waits.
+
+  | Bird | Power | Hardest on |
+  |------|-------|------------|
+  | basic | none | (no favourite) |
+  | heavy | none: five times the mass of a basic bird | stone (x2) |
+  | bomber | explodes on impact or on click: pushes and damages everything within 2.5 m, even through walls | (blast) |
+  | triple | splits into three, fanned 11 degrees apart, at the same speed | ice (x3); soft on wood and stone |
+  | dart | dashes forward at 30 m/s | wood (x3); soft on stone |
+  | dropper | drops an egg straight down (a small blast, 1.6 m) and hops up and away | (blast) |
+
+  Pigs take every bird's damage as it comes. The dart's 30 m/s needs no smaller time step. A bird
+  only gets through a block in one step if its centre crosses the block's middle, which takes its
+  radius plus the block's half width (34 cm for the thinnest post) in a step; a dash covers 25 cm. A
+  test fires darts at full dash into a near-immovable 24 cm post to check this.
 - **Winning.** Pop every pig. The score is everything broken, plus 10,000 for each bird left over.
   Stars are against par, the fewest birds known to solve the level.
 
@@ -32,12 +43,16 @@ pig on a plank tilted by a tenth of a degree rolls off in time.
 
 | # | Level | Idea | Birds | Par |
 |---|-------|------|-------|-----|
-| 1 | First Pig | one pig on a wooden table | 3 balls | 1 |
-| 2 | Glass House | ice: the house comes down on the pig inside | 3 balls | 1 |
-| 3 | Wood Fort | a two-storey fort, a pig on every floor | 3 balls | 1 |
-| 4 | Stone Wall | stone in front of a helmet pig: the heavy bird gets through | heavy + 2 balls | 1 |
-| 5 | Two Towers | two towers and a big pig between them | 4 balls | 2 |
-| 6 | Bunker | a big pig in concrete: only blasts reach it | 2 blasts + ball | 2 |
+| 1 | First Pig | one pig on a wooden table | 3 basic | 1 |
+| 2 | Glass House | ice: the house comes down on the pig inside | 3 basic | 1 |
+| 3 | Wood Fort | a two-storey fort, a pig on every floor | 3 basic | 1 |
+| 4 | Stone Wall | stone in front of a helmet pig: the heavy bird gets through | heavy + 2 basic | 1 |
+| 5 | Two Towers | two towers and a big pig between them | 4 basic | 2 |
+| 6 | Bunker | a big pig in concrete: only blasts reach it | 2 bombers + basic | 2 |
+| 7 | Ice Palace | three ice rooms: split the triple | 2 triples + basic | 1 |
+| 8 | Timber Yard | a wall of big wooden blocks: dash through it | 2 darts + basic | 2 |
+| 9 | Rooftops | pigs in stone huts: drop eggs on the roofs | 3 droppers | 2 |
+| 10 | Mixed Flock | stone, wood and ice in one fort, one bird for each | heavy, dart, triple, bomber | 2 |
 
 ## Build and play
 
@@ -62,12 +77,18 @@ cmake --preset debug && cmake --build --preset debug && ctest --preset debug    
 
 The rules are tested on small hand-built layouts: the sling's clamps, damage only from real impacts,
 ice before wood before stone, pigs and falls, popping and scoring, the bird bonus, blasts, motors,
-sliders, and joints letting go when their piece pops. Every level is tested too:
+sliders, joints letting go when their piece pops, and each power: only in flight and only once,
+the triple's fan, the dart's dash (and that it cannot tunnel), the dropper's egg through a roof, and
+each bird being hardest on its own material. Every level is tested too:
 - nothing overlaps at the start;
 - it stands for 10 seconds without a scratch;
 - its recorded par solution (`tests/solutions.hpp`) still wins with three stars, replayed step for step;
-- its claims hold. In Stone Wall the heavy bird gets through far more often than a ball. In Bunker
-  nothing but a blast touches the big pig.
+- its claims hold:
+  - Stone Wall: the heavy bird gets through far more often than a ball.
+  - Bunker: nothing but a blast touches the big pig.
+  - Ice Palace: splitting the triple clears three rooms nearly four times as often as not splitting.
+  - Timber Yard: a dashing dart breaks the wall three times as often as a basic bird.
+  - Rooftops: an egg dropped over a hut pops its pig far more often than a bird thrown at it.
 
 Each test was checked by breaking the code it guards in a scratch copy and confirming the test fails.
 
@@ -78,13 +99,13 @@ bit in both builds.
 
 ```bash
 build/release/kid_solve --level 4                      # search level 4
-build/release/kid_solve --level 6 --detonate 0,0.6,0.8 # also try setting blasts off in flight
-build/release/kid_solve --level 4 --ammo bbb           # could it be done with balls only? (b, h heavy, x blast)
+build/release/kid_solve --level 7 --powers 0,0.4,0.8   # when to use the power (seconds after firing; 0 never)
+build/release/kid_solve --level 4 --ammo bbb           # other birds? (b basic, h heavy, x bomber, s triple, d dart, e dropper)
 ```
 
 The solver tries every shot on a grid (1 degree by 0.5 m/s), keeps the best few results (most pigs
 popped), and tries the grid again from each, one bird deeper each time. It prints how many tries win
-at each depth, the most robust winning sequence (as exact pulls and fire steps for
+at each depth, the most robust winning sequence (as exact pulls, fire steps and power steps for
 `tests/solutions.hpp`), and how often that sequence still wins with every pull nudged up to 1 cm.
 
 ## Layout

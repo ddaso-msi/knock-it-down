@@ -161,7 +161,7 @@ void press(App& app, float x, float y) {
         }
     if (!over_world(app) || app.paused) return;
     Level& level = *app.level;
-    if (level.detonate()) return;  // a click while a blast bird is in flight sets it off
+    if (level.power()) return;  // a click while a bird can still use its power uses it
     // Grab the bird: anywhere near the sling counts, it does not have to be a precise click.
     constexpr Real kGrab = 1.5f;
     const Vec2 p = to_world(x, y);
@@ -299,7 +299,7 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
         const std::vector<std::string> lines = level.help();
         const char* keys[] = {
             "Drag   pull a bird back from the sling; let go to fire",
-            "Click  set off a blast bird in flight",
+            "Click  use the power of the bird in flight (before it hits anything)",
             "RMB    let a pulled bird back down (right mouse button)",
             "R      reset the level",
             "Tab    pause or resume",

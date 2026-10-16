@@ -37,7 +37,7 @@ Level replay(const Solution& s) {
     size_t next = 0;
     for (long step = 0; step < 120L * 60 && g.status == Status::Playing; ++step) {
         for (const testdata::Shot& shot : s.shots)
-            if (shot.detonate == step) CHECK(g.detonate());
+            if (shot.power == step) CHECK(g.power());
         if (next < s.shots.size() && s.shots[next].step == step) {
             CHECK(g.fire(s.shots[next].pull));
             ++next;
@@ -51,8 +51,9 @@ Level replay(const Solution& s) {
 // Fires one shot from each point of a grid (every 3 degrees from -20 to 70, every 1 m/s from 6 to 20)
 // with `ammo` as the level's first bird, plays until things settle, and counts the shots after which
 // `hit` is true.
+// With `power_x` set, the bird uses its power as it passes that x.
 template <class Hit>
-int shots_that(Layout l, Ammo ammo, Hit hit) {
+int shots_that(Layout l, Ammo ammo, Hit hit, Real power_x = -1) {
     l.ammo = {ammo, Ammo::Ball};  // a second bird in hand, so the level waits for the first to settle
     const Level start(l);
     int count = 0;
@@ -61,8 +62,9 @@ int shots_that(Layout l, Ammo ammo, Hit hit) {
             Level g = start;
             g.fire(g.pull_for(static_cast<Real>(a) * phys::kPi / 180, static_cast<Real>(s)));
             for (int i = 0; i < 120 * 6; ++i) {
+                if (power_x > 0 && g.power_ready() && g.world.bodies[static_cast<size_t>(g.shots[0])].pos.x >= power_x) g.power();
                 g.step();
-                if (g.status != Status::Playing || (g.since_last_shot() > 1.0 && g.quiet())) break;
+                if (g.status != Status::Playing || (g.since_last_shot() > 1.0 && g.quiet() && !g.blast_live())) break;
             }
             count += hit(g);
         }
@@ -77,8 +79,8 @@ int body_of_kind(const Level& g, Pig kind) {
 
 }  // namespace
 
-TEST(there_are_six_levels_with_distinct_names) {
-    CHECK(level_count() == 6);
+TEST(there_are_ten_levels_with_distinct_names) {
+    CHECK(level_count() == 10);
     std::set<std::string> names;
     for (int i = 0; i < level_count(); ++i) {
         const Layout l = make_layout(i);
@@ -174,4 +176,32 @@ TEST(bunker_nothing_but_a_blast_reaches_the_big_pig) {
     CHECK(shots_that(l, Ammo::Ball, big_hurt) == 0);
     CHECK(shots_that(l, Ammo::Heavy, big_hurt) == 0);
     CHECK(shots_that(l, Ammo::Blast, big_hurt) > 0);
+}
+
+TEST(ice_palace_splitting_the_triple_pays) {
+    const Layout l = layout_named("Ice Palace");
+    const auto three_popped = [](const Level& g) { return static_cast<int>(g.pigs.size()) - g.pigs_left >= 3; };
+    const int whole = shots_that(l, Ammo::Split, three_popped), split = shots_that(l, Ammo::Split, three_popped, 9.0f);
+    std::printf("    Ice Palace: three pigs or more with one triple: %d shots unsplit, %d split\n", whole, split);
+    CHECK(split >= 2 * whole + 5);
+}
+
+TEST(timber_yard_a_dashing_dart_tears_through_the_wall) {
+    const Layout l = layout_named("Timber Yard");
+    const auto wall_broken = [](const Level& g) {
+        int broken = 0;
+        for (int i = 0; i < 6; ++i) broken += g.popped(g.blocks[static_cast<size_t>(i)]);  // the wall is the first six blocks
+        return broken >= 2;
+    };
+    const int ball = shots_that(l, Ammo::Ball, wall_broken), dart = shots_that(l, Ammo::Dart, wall_broken, 8.0f);
+    std::printf("    Timber Yard: two wall blocks broken by %d shots of a basic bird, %d of a dashing dart\n", ball, dart);
+    CHECK(dart >= 3 * ball + 5);
+}
+
+TEST(rooftops_an_egg_gets_into_a_hut_that_a_bird_cannot) {
+    const Layout l = layout_named("Rooftops");
+    const auto first_hut = [](const Level& g) { return g.popped(g.pigs[0]); };
+    const int thrown = shots_that(l, Ammo::Dropper, first_hut), dropped = shots_that(l, Ammo::Dropper, first_hut, 10.9f);
+    std::printf("    Rooftops: first hut's pig popped by %d shots thrown, %d with the egg dropped over it\n", thrown, dropped);
+    CHECK(dropped >= 2 * thrown + 5);
 }

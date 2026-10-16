@@ -15,6 +15,10 @@ RoleColors role_colors(Role role) {
         case Role::Ball: return {color::kTool, color::kToolEdge};
         case Role::Heavy: return {{40, 92, 160, 255}, {130, 180, 240, 255}};
         case Role::Blast: return {{226, 72, 96, 255}, {255, 176, 186, 255}};
+        case Role::Split: return {{64, 196, 200, 255}, {186, 246, 246, 255}};
+        case Role::Dart: return {{232, 196, 64, 255}, {255, 238, 170, 255}};
+        case Role::Dropper: return {{228, 226, 236, 255}, {255, 255, 255, 255}};
+        case Role::Egg: return {{246, 240, 214, 255}, {200, 190, 150, 255}};
         case Role::Hidden: return {{0, 0, 0, 0}, {0, 0, 0, 0}};
         case Role::Guide: return {{96, 104, 128, 255}, {190, 196, 214, 255}};
         case Role::Band: return {{120, 82, 52, 255}, {168, 120, 78, 255}};
@@ -148,7 +152,7 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
     }
     for (const Overlay::Ring& r : marks.rings) {
         const Uint8 alpha = static_cast<Uint8>(std::clamp(r.fade, 0.0f, 1.0f) * 255.0f);
-        fill_disc(ren, to_screen(r.p), r.radius * kPixelsPerMeter, {255, 150, 90, static_cast<Uint8>(alpha / 5)});
+        if (r.radius > 1.0f) fill_disc(ren, to_screen(r.p), r.radius * kPixelsPerMeter, {255, 150, 90, static_cast<Uint8>(alpha / 5)});  // blasts only
         ring(ren, r.p, r.radius, {255, 200, 120, alpha});
         ring(ren, r.p, r.radius * 0.97f, {255, 120, 90, alpha});
     }
@@ -175,7 +179,7 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
 }
 
 void draw_ammo_icon(SDL_Renderer* ren, SDL_FPoint centre, Ammo a, bool spent) {
-    const Role r = a == Ammo::Heavy ? Role::Heavy : a == Ammo::Blast ? Role::Blast : Role::Ball;
+    const Role r = role_of(a);
     const RoleColors c = role_colors(r);
     const float radius = ammo_props(a).radius * kPixelsPerMeter * 0.8f;
     if (spent) {
