@@ -40,8 +40,18 @@ No art: everything is drawn from plain shapes. The names and the look are our ow
   known to solve the level), taken from the solver's winning tries. Two stars is one bird's bonus
   less, and any win is one star.
 
-What you see on top of the physics is only drawn: the simulation and the recorded solutions are
-untouched by it.
+What you see and hear on top of the physics is only drawn and played: the simulation and the
+recorded solutions are untouched by it.
+- **The camera** shows the whole arena while you aim. Once a bird is away it frames the bird
+  together with everything still standing, moving in as close as that allows. It holds on the crash,
+  then eases back out.
+- **Hard hits** shake the view; the hardest, every blast and every popped pig freeze the picture for
+  an instant.
+- **Birds** stretch with speed and squash when they hit, and the sling's bands quiver after a shot.
+- **Sound** is synthesised from what happens, with no recordings: knocks in the voice of each
+  material, scaled by the impact, breaking blocks, squealing pigs, booms, the sling's creak and
+  twang, a swish for each power, a jingle and a chime per star, and wind with distant birds
+  underneath. `M` mutes it.
 - Popped pieces burst into debris in their own colours, and their points float up.
 - The last bird's path stays on screen as dots (the one before it fainter), to aim the next by.
 - A bird above the top of the screen shows as a marker under the bar, with its height.
@@ -80,7 +90,7 @@ cmake --preset release && cmake --build --preset release
 build/release/knock_it_down
 ```
 
-`R` resets, `Tab` pauses, `H` shows the help, `C` shows contact points, `N` goes to the next level once
+`R` resets, `Tab` pauses, `H` shows the help, `C` shows contact points, `M` mutes, `N` goes to the next level once
 solved, `Esc` lets a pulled bird back down, then goes back to the menu. Best results are saved per
 level.
 
@@ -109,6 +119,10 @@ each bird being hardest on its own material. Every level is tested too:
     real level.
 
 Each test was checked by breaking the code it guards in a scratch copy and confirming the test fails.
+
+The sounds are tested too: no clip clips, clicks or comes out silent, harder hits are louder, ice
+rings higher than wood and wood higher than the ground, and the background stays quiet. The game's
+script mode records what it would play (`--sound FILE.wav`), to check the mix without a speaker.
 
 The build turns off fused multiply-add (`-ffp-contract=off`), so a recorded solution replays bit for
 bit in both builds.

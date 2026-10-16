@@ -7,6 +7,7 @@
 #include <level.hpp>
 
 #include <cstdint>
+#include <utility>
 #include <vector>
 
 namespace kid::app {
@@ -22,6 +23,10 @@ public:
     // Trails go under the bodies; debris, points and markers go over them.
     void draw_under(SDL_Renderer* ren) const;
     void draw_over(SDL_Renderer* ren, const Level& level, float top_of_view) const;
+    // How squashed a bird is from its latest hit: 1 just hit, 0 back to round.
+    float squash(int body) const;
+    // Where the empty sling's bands meet, relative to the pouch, as they quiver after a shot.
+    Vec2 sling_wobble() const;
 
 private:
     struct Bit {
@@ -41,6 +46,10 @@ private:
     std::vector<Bit> bits_;
     std::vector<Points> points_;
     std::vector<Vec2> trail_, last_trail_;
+    std::vector<std::pair<int, float>> squash_;  // bird body, time left
+    size_t hits_seen_ = 0;
+    float wobble_t_ = 10;  // seconds since the last shot left the sling
+    Vec2 wobble_dir_;
     size_t pops_seen_ = 0;
     size_t shots_seen_ = 0;
     double last_mark_ = -1;      // sim_time of the latest trail dot

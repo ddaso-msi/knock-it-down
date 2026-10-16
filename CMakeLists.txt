@@ -32,6 +32,10 @@ add_library(kid_game STATIC game/level.cpp game/layout.cpp game/progress.cpp gam
 target_include_directories(kid_game PUBLIC game)
 target_link_libraries(kid_game PUBLIC phys)
 
+# The game's sounds, synthesised: no SDL, so the tests can check them.
+add_library(kid_synth STATIC sound/synth.cpp)
+target_include_directories(kid_synth PUBLIC sound)
+
 # Searches a level for winning shots: how levels are checked to be solvable, and how par is found.
 add_executable(kid_solve tools/solve.cpp)
 target_link_libraries(kid_solve PRIVATE kid_game)
@@ -41,8 +45,8 @@ add_subdirectory(tests)
 
 find_package(SDL3 CONFIG QUIET)
 if(SDL3_FOUND)
-  add_executable(knock_it_down app/main.cpp app/render.cpp app/scene.cpp app/effects.cpp)
-  target_link_libraries(knock_it_down PRIVATE kid_game SDL3::SDL3)
+  add_executable(knock_it_down app/main.cpp app/render.cpp app/scene.cpp app/effects.cpp app/audio.cpp app/camera.cpp)
+  target_link_libraries(knock_it_down PRIVATE kid_game kid_synth SDL3::SDL3)
 else()
   message(STATUS "SDL3 not found, skipping the game itself")
 endif()

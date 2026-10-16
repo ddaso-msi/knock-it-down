@@ -6,10 +6,16 @@
 namespace kid::app {
 
 constexpr int kWidth = 1280, kHeight = 720;
-constexpr float kPixelsPerMeter = 64.0f;  // the window shows the 20 x 11.25 m arena exactly
+constexpr float kPixelsPerMeter = 64.0f;  // at this zoom the window shows the 20 x 11.25 m arena exactly
 
+// The view of the world: the world point at the middle of the window, pixels per metre, and a shake
+// offset in pixels. The camera sets it each frame; until then it shows the whole arena.
+void set_view(phys::Vec2 centre, float pixels_per_meter, SDL_FPoint shake = {0, 0});
+float view_scale();
 SDL_FPoint to_screen(phys::Vec2 w);
 phys::Vec2 to_world(float sx, float sy);
+// A length in metres, in pixels at the current zoom.
+inline float to_pixels(float meters) { return meters * view_scale(); }
 
 // The palette. Targets are the only warm colour on screen.
 namespace color {

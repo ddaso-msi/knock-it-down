@@ -12,8 +12,14 @@ using phys::Vec2;
 
 namespace {
 
-constexpr float kWorldH = static_cast<float>(kHeight) / kPixelsPerMeter;
 constexpr int kSegments = 32;
+
+struct View {
+    Vec2 centre{static_cast<float>(kWidth) * 0.5f / kPixelsPerMeter, static_cast<float>(kHeight) * 0.5f / kPixelsPerMeter};
+    float scale = kPixelsPerMeter;
+    SDL_FPoint shake{0, 0};
+};
+View g_view;
 
 SDL_FColor to_fcolor(SDL_Color c) {
     return {static_cast<float>(c.r) / 255.0f, static_cast<float>(c.g) / 255.0f, static_cast<float>(c.b) / 255.0f,
@@ -43,8 +49,17 @@ void circle_points(SDL_FPoint centre, float radius, SDL_FPoint* out) {
 
 }  // namespace
 
-SDL_FPoint to_screen(Vec2 w) { return {w.x * kPixelsPerMeter, (kWorldH - w.y) * kPixelsPerMeter}; }
-Vec2 to_world(float sx, float sy) { return {sx / kPixelsPerMeter, kWorldH - sy / kPixelsPerMeter}; }
+void set_view(Vec2 centre, float pixels_per_meter, SDL_FPoint shake) { g_view = {centre, pixels_per_meter, shake}; }
+float view_scale() { return g_view.scale; }
+
+SDL_FPoint to_screen(Vec2 w) {
+    return {(w.x - g_view.centre.x) * g_view.scale + static_cast<float>(kWidth) * 0.5f + g_view.shake.x,
+            (g_view.centre.y - w.y) * g_view.scale + static_cast<float>(kHeight) * 0.5f + g_view.shake.y};
+}
+Vec2 to_world(float sx, float sy) {
+    return {(sx - g_view.shake.x - static_cast<float>(kWidth) * 0.5f) / g_view.scale + g_view.centre.x,
+            g_view.centre.y - (sy - g_view.shake.y - static_cast<float>(kHeight) * 0.5f) / g_view.scale};
+}
 
 void set_color(SDL_Renderer* ren, SDL_Color c) { SDL_SetRenderDrawColor(ren, c.r, c.g, c.b, c.a); }
 
@@ -87,7 +102,7 @@ void draw_body(SDL_Renderer* ren, const Body& b, SDL_Color fill, SDL_Color edge)
     SDL_FPoint pts[kSegments + 1];
     int count = 0;
     if (b.shape.type == phys::Shape::Type::Circle) {
-        circle_points(to_screen(b.pos), b.shape.circle.radius * kPixelsPerMeter, pts);
+        circle_points(to_screen(b.pos), to_pixels(b.shape.circle.radius), pts);
         count = kSegments;
     } else {
         const phys::Polygon& p = b.shape.polygon;

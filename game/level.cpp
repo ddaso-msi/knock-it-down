@@ -68,6 +68,9 @@ void Level::reset() {
     shot_ammo_.clear();
     flashes_.clear();
     pops.clear();
+    hits.clear();
+    booms.clear();
+    powers_used.clear();
     fuses_.clear();
     flying_ = -1;
     build();
@@ -83,13 +86,14 @@ void Level::build() {
     driven_.clear();
     drives_.clear();
 
-    // The room: floor (top at kFloorTop), side walls, and a ceiling just out of view. The slingshot is
-    // only drawn: nothing in the world stands where a bird is pulled back to.
+    // The room: floor (top at kFloorTop), side walls, and a ceiling far above the view (kRoomTop), so
+    // a high lob arcs over and comes down rather than bouncing off something you cannot see. The
+    // slingshot is only drawn: nothing in the world stands where a bird is pulled back to.
     const Real t = kFloorTop * 0.5f;
     world.add(make_static({kWorldW * 0.5f, t}, {kWorldW * 0.5f, t}));
-    world.add(make_static({t, kWorldH * 0.5f}, {t, kWorldH * 0.5f}));
-    world.add(make_static({kWorldW - t, kWorldH * 0.5f}, {t, kWorldH * 0.5f}));
-    world.add(make_static({kWorldW * 0.5f, kWorldH + t}, {kWorldW * 0.5f, t}));
+    world.add(make_static({t, kRoomTop * 0.5f}, {t, kRoomTop * 0.5f}));
+    world.add(make_static({kWorldW - t, kRoomTop * 0.5f}, {t, kRoomTop * 0.5f}));
+    world.add(make_static({kWorldW * 0.5f, kRoomTop + t}, {kWorldW * 0.5f, t}));
     for (const Wall& w : layout_.walls) world.add(make_static(w.pos, w.half, w.angle));
     piece_of_.assign(world.bodies.size(), -1);
     health.assign(world.bodies.size(), kNoHealth);
@@ -182,15 +186,21 @@ void Level::apply_damage(const std::vector<Vec2>& vel, const std::vector<Real>& 
     for (const phys::ContactPair& c : world.contacts()) {
         if (c.dormant || c.manifold.count == 0) continue;
         const size_t a = static_cast<size_t>(c.a), b = static_cast<size_t>(c.b);
-        if (a >= vel.size() || b >= vel.size() || (health[a] == kNoHealth && health[b] == kNoHealth)) continue;
+        if (a >= vel.size() || b >= vel.size()) continue;
         Real impulse = 0;
+        Vec2 where;
         for (int k = 0; k < c.manifold.count; ++k) {
             const phys::ContactPoint& p = c.manifold.points[k];
             const Vec2 va = vel[a] + cross(spin[a], p.point - world.bodies[a].pos);
             const Vec2 vb = vel[b] + cross(spin[b], p.point - world.bodies[b].pos);
-            if (dot(va - vb, c.manifold.normal) > kDamageSpeed) impulse += p.normal_impulse;
+            if (dot(va - vb, c.manifold.normal) > kDamageSpeed) {
+                impulse += p.normal_impulse;
+                where = p.point;
+            }
         }
         if (impulse <= 0) continue;
+        hits.push_back({c.a, c.b, surface(a), surface(b), where, impulse, sim_time});
+        if (health[a] == kNoHealth && health[b] == kNoHealth) continue;
         // A bird is harder on some materials than others.
         const auto factor = [&](size_t bird, size_t hit) {
             const int shot = shot_of_[bird], p = piece_of_[hit];
@@ -350,6 +360,7 @@ bool Level::power() {
     const Ammo kind = shot_ammo_[static_cast<size_t>(shot)];
     Body& b = world.bodies[static_cast<size_t>(body)];
     const Vec2 p = b.pos, v = b.vel;
+    powers_used.push_back({p, kind, sim_time});
     const Real speed = v.length();
     const Vec2 heading = speed > 1e-4f ? v * (1 / speed) : Vec2{1, 0};
     switch (kind) {
@@ -414,6 +425,7 @@ void Level::explode(const Fuse& fuse) {
     }
     remove(index);  // the bomber or egg itself is spent (this also takes it off the fuse list)
     flashes_.push_back({at, sim_time, fuse.radius});
+    booms.push_back({at, fuse.radius, sim_time});
     last_shot_time_ = sim_time;  // the settle clock starts from the explosion
     for (size_t i = 0; i < health.size(); ++i)
         if (health[i] != kNoHealth && health[i] <= 0 && !popped(static_cast<int>(i))) pop(static_cast<int>(i));
@@ -438,6 +450,15 @@ Role Level::role(size_t body) const {
     return layout_.pieces[static_cast<size_t>(p)].kind == Kind::Pig ? Role::Pig : Role::Block;
 }
 
+Level::Surface Level::surface(size_t body) const {
+    if (shot_of(body) >= 0) return Surface::Bird;
+    const int p = body < piece_of_.size() ? piece_of_[body] : -1;
+    if (p < 0) return Surface::Static;
+    const Piece& piece = layout_.pieces[static_cast<size_t>(p)];
+    if (piece.kind == Kind::Pig) return Surface::Pig;
+    return piece.material == Material::Stone ? Surface::Stone : piece.material == Material::Ice ? Surface::Ice : Surface::Wood;
+}
+
 Material Level::material(size_t body) const {
     const int p = body < piece_of_.size() ? piece_of_[body] : -1;
     return p < 0 ? Material::Wood : layout_.pieces[static_cast<size_t>(p)].material;
@@ -454,7 +475,7 @@ std::optional<Pig> Level::pig_kind(size_t body) const {
     return layout_.pieces[static_cast<size_t>(p)].pig;
 }
 
-void Level::overlay(Overlay& out, std::optional<Vec2> pull) const {
+void Level::overlay(Overlay& out, std::optional<Vec2> pull, Vec2 wobble) const {
     for (const Flash& f : flashes_) {
         const float age = static_cast<float>((sim_time - f.time) / kFlashTime);
         out.rings.push_back({f.p, f.radius * (0.3f + 0.7f * age), 1.0f - age});
@@ -479,7 +500,8 @@ void Level::overlay(Overlay& out, std::optional<Vec2> pull) const {
         out.dots.push_back({bird, ammo_props(*next).radius, can_fire() ? r : Role::Guide});
         out.lines.push_back({front, bird, Role::Guide, false});
     } else {
-        out.lines.push_back({back, front, Role::Guide, false});
+        out.lines.push_back({back, pouch + wobble, Role::Guide, false});
+        out.lines.push_back({pouch + wobble, front, Role::Guide, false});
     }
     if (!pull || !can_fire() || held.length() < kMinPull) return;
 

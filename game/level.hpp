@@ -84,6 +84,30 @@ public:
         double time;  // sim_time
     };
     std::vector<Pop> pops;
+    // Every impact hard enough to hurt (closing faster than kDamageSpeed), whether or not anything
+    // could be hurt by it: a bird hitting the floor counts. For sound and screen shake.
+    enum class Surface { Static, Wood, Stone, Ice, Pig, Bird };
+    struct Hit {
+        int a, b;      // the two bodies
+        Surface sa, sb;
+        Vec2 pos;
+        Real impulse;  // N s
+        double time;
+    };
+    std::vector<Hit> hits;
+    struct Boom {  // a bomber or an egg going off
+        Vec2 pos;
+        Real radius;
+        double time;
+    };
+    std::vector<Boom> booms;
+    struct PowerUse {
+        Vec2 pos;
+        Ammo kind;
+        double time;
+    };
+    std::vector<PowerUse> powers_used;
+    Surface surface(size_t body) const;
 
     explicit Level(Layout layout);
 
@@ -131,8 +155,9 @@ public:
     // 1 untouched, 0 about to pop. Bodies that cannot be damaged are always 1.
     Real condition(size_t body) const;
     std::optional<Pig> pig_kind(size_t body) const;
-    // `pull`: the bird is being held back in the sling right now.
-    void overlay(Overlay& out, std::optional<Vec2> pull) const;
+    // `pull`: the bird is being held back in the sling right now. `wobble` moves where the empty
+    // bands meet (they quiver after a shot).
+    void overlay(Overlay& out, std::optional<Vec2> pull, Vec2 wobble = {}) const;
     std::vector<std::string> help() const;  // how to play, a line each
     std::string hint() const;               // what to do right now
     std::string stats() const;              // counters for the status bar

@@ -17,6 +17,8 @@ using phys::World;
 
 // The arena, in metres. The app shows exactly this area, so levels are laid out in world units.
 constexpr Real kWorldW = 20.0f, kWorldH = 11.25f;
+// The room's walls and ceiling go up to here: the top speed (20 m/s) cannot reach it.
+constexpr Real kRoomTop = 40.0f;
 constexpr Real kFloorTop = 0.5f;
 // Every level advances by this step and nothing else, so a replay of the same shots is identical.
 constexpr Real kTimeStep = 1.0f / 120.0f;

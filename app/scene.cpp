@@ -28,15 +28,15 @@ RoleColors role_colors(Role role) {
     return {color::kStatic, color::kStaticEdge};
 }
 
-void draw_grid(SDL_Renderer* ren) {
+void draw_grid(SDL_Renderer* ren) {  // a line every metre of the arena, wherever the camera is
     set_color(ren, color::kGrid);
-    for (int x = 1; x < kWidth / static_cast<int>(kPixelsPerMeter); ++x) {
-        const float sx = static_cast<float>(x) * kPixelsPerMeter;
-        SDL_RenderLine(ren, sx, 0, sx, static_cast<float>(kHeight));
+    for (int x = 1; x < static_cast<int>(kWorldW); ++x) {
+        const SDL_FPoint a = to_screen({static_cast<float>(x), 0}), b = to_screen({static_cast<float>(x), kWorldH});
+        SDL_RenderLine(ren, a.x, a.y, b.x, b.y);
     }
-    for (int y = 1; y <= kHeight / static_cast<int>(kPixelsPerMeter); ++y) {
-        const SDL_FPoint p = to_screen({0, static_cast<float>(y)});
-        SDL_RenderLine(ren, 0, p.y, static_cast<float>(kWidth), p.y);
+    for (int y = 1; y <= static_cast<int>(kWorldH); ++y) {
+        const SDL_FPoint a = to_screen({0, static_cast<float>(y)}), b = to_screen({kWorldW, static_cast<float>(y)});
+        SDL_RenderLine(ren, a.x, a.y, b.x, b.y);
     }
 }
 
@@ -93,7 +93,7 @@ void draw_cracks(SDL_Renderer* ren, const Body& b, Real condition) {
 void draw_pig_face(SDL_Renderer* ren, const Body& b, Pig kind) {
     const Real r = b.shape.circle.radius;
     const auto at = [&](Real x, Real y) { return to_screen(b.pos + rotate(b.q, Vec2{x, y} * r)); };
-    const float px = r * kPixelsPerMeter;
+    const float px = to_pixels(r);
     if (kind == Pig::Helmet) {  // a cap over the top third
         SDL_FPoint cap[18];
         for (int i = 0; i < 17; ++i) {
@@ -113,6 +113,24 @@ void draw_pig_face(SDL_Renderer* ren, const Body& b, Pig kind) {
     for (Real side : {-1.0f, 1.0f}) fill_disc(ren, at(0.12f * side, -0.22f), px * 0.07f, {50, 90, 40, 255});
 }
 
+// A bird as an ellipse along its velocity: longer the faster it goes, flattened for a moment after a hit.
+void draw_bird(SDL_Renderer* ren, const Body& b, float squash, RoleColors c) {
+    const Real r = b.shape.circle.radius, speed = b.vel.length();
+    const Vec2 along = speed > 0.5f ? b.vel * (1 / speed) : Vec2{1, 0}, across{-along.y, along.x};
+    const Real stretch = 1 + std::min<Real>(0.22f, speed / 90.0f);
+    const Real a = r * stretch * (1 - 0.35f * squash), s = r / stretch * (1 + 0.25f * squash);
+    constexpr int kSides = 28;
+    SDL_FPoint pts[kSides + 1];
+    for (int k = 0; k < kSides; ++k) {
+        const float t = 6.2831853f * static_cast<float>(k) / kSides;
+        pts[k] = to_screen(b.pos + along * (a * std::cos(t)) + across * (s * std::sin(t)));
+    }
+    fill_polygon(ren, pts, kSides, c.fill);
+    pts[kSides] = pts[0];
+    set_color(ren, c.edge);
+    SDL_RenderLines(ren, pts, kSides + 1);
+}
+
 void ring(SDL_Renderer* ren, Vec2 centre, Real radius, SDL_Color c) {
     constexpr int kSides = 48;
     SDL_FPoint pts[kSides + 1];
@@ -130,7 +148,7 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
     draw_grid(ren);
     if (fx) fx->draw_under(ren);
     Overlay marks;
-    level.overlay(marks, pull);
+    level.overlay(marks, pull, fx ? fx->sling_wobble() : Vec2{});
 
     const World& world = level.world;
     for (size_t i = 0; i < world.bodies.size(); ++i) {
@@ -139,6 +157,10 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
         RoleColors c = body_colors(r, level.material(i));
         const Real condition = level.condition(i);
         if (condition < 0.34f) c.fill = mix(c.fill, {50, 40, 34, c.fill.a}, 0.35f);  // nearly gone: darker
+        if (level.shot_of(i) >= 0) {  // a bird: stretched by its speed, squashed by its last hit
+            draw_bird(ren, world.bodies[i], fx ? fx->squash(static_cast<int>(i)) : 0.0f, c);
+            continue;
+        }
         draw_body(ren, world.bodies[i], c.fill, c.edge);
         if (r == Role::Pig) draw_pig_face(ren, world.bodies[i], *level.pig_kind(i));
         draw_cracks(ren, world.bodies[i], condition);
@@ -161,13 +183,13 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
     }
     for (const Overlay::Ring& r : marks.rings) {
         const Uint8 alpha = static_cast<Uint8>(std::clamp(r.fade, 0.0f, 1.0f) * 255.0f);
-        if (r.radius > 1.0f) fill_disc(ren, to_screen(r.p), r.radius * kPixelsPerMeter, {255, 150, 90, static_cast<Uint8>(alpha / 5)});  // blasts only
+        if (r.radius > 1.0f) fill_disc(ren, to_screen(r.p), to_pixels(r.radius), {255, 150, 90, static_cast<Uint8>(alpha / 5)});  // blasts only
         ring(ren, r.p, r.radius, {255, 200, 120, alpha});
         ring(ren, r.p, r.radius * 0.97f, {255, 120, 90, alpha});
     }
     for (const Overlay::Dot& d : marks.dots) {
         const RoleColors c = role_colors(d.role);
-        const float r = d.radius * kPixelsPerMeter;
+        const float r = to_pixels(d.radius);
         if (r > 6.0f) fill_disc(ren, to_screen(d.p), r + 2.0f, c.edge);
         fill_disc(ren, to_screen(d.p), r, r > 6.0f ? c.fill : c.edge);
     }

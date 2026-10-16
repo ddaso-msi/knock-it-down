@@ -2,7 +2,7 @@
 //
 //   press near the sling, drag back, let go  fire (the dots show the path)
 //   click while a blast bird is in flight    set it off       right click or Esc while pulling: let it down
-//   R  reset the level     Tab  pause     H  help     C  show contacts     N  next level (after solving)
+//   R  reset   Tab  pause   H  help   C  show contacts   M  sound on/off   N  next level (after solving)
 //   Esc  close the help, then back to the menu
 //   On the menu: click a level, or arrows + Enter, or 1-9.     Q  quit
 //
@@ -18,6 +18,10 @@
 //   --steps N          advance the simulation N fixed steps
 //   --key NAME         reset, pause, help, contacts, next, escape
 //   --capture FILE     draw the current frame and save it as a BMP
+//   --camera off       keep the whole arena in view (the camera does not follow)
+//   --sound FILE       record what the game would play, from here on, and save it as a WAV at the end
+#include "audio.hpp"
+#include "camera.hpp"
 #include "effects.hpp"
 #include "render.hpp"
 #include "scene.hpp"
@@ -47,6 +51,9 @@ constexpr float kFooterTop = static_cast<float>(kHeight) - kFloorTop * kPixelsPe
 constexpr int kColumns = 5;
 // When the last pig pops, the game runs at kSlowSpeed for kSlowTime seconds before the win panel.
 constexpr float kSlowTime = 1.4f, kSlowSpeed = 0.3f;
+// A hard enough hit freezes the picture for an instant (the simulation just waits), and shakes it.
+constexpr float kFreezeTime = 0.05f;
+constexpr float kStarGap = 0.3f;  // seconds between the stars of a win appearing
 
 enum class Action { None, Reset, Pause, Help, Menu, Next, Contacts };
 
@@ -63,8 +70,16 @@ struct App {
     std::optional<Vec2> pull;      // a bird is being held back in the sling: by this much
     Effects fx;
     float slow = 0;                // seconds of slow motion still to go
+    float freeze = 0;              // seconds the simulation still waits after a big hit
+    Camera camera;
+    Audio audio;
+    Soundboard sounds;
+    size_t hits_seen = 0, booms_seen = 0, pops_seen = 0;
+    int stars_shown = 0;           // of the win panel's stars, how many are out so far
+    float star_clock = 0;
     bool scripted = false;         // the scripted run: every update is exactly one step, never slowed
     std::string save_path;         // empty: do not save (script mode)
+    std::string sound_path;        // script mode: where to save the recorded sound, if anywhere
     bool recorded = false;         // this attempt's win is already in `progress`
 };
 
@@ -108,14 +123,24 @@ void save_progress(const App& app) {
 
 // ---- state changes ----
 
+// Everything about how the level looks and sounds goes back to the start along with it.
+void restart_feel(App& app) {
+    app.fx.clear();
+    app.sounds.clear();
+    app.camera.reset();
+    app.slow = app.freeze = 0;
+    app.hits_seen = app.booms_seen = app.pops_seen = 0;
+    app.stars_shown = 0;
+    app.star_clock = 0;
+}
+
 void start_level(App& app, int index) {
     if (index < 0 || index >= level_count()) return;
     app.level = std::make_unique<Level>(make_layout(index));
     app.index = index;
     app.paused = app.show_help = app.recorded = false;
     app.pull.reset();
-    app.fx.clear();
-    app.slow = 0;
+    restart_feel(app);
     app.timestep = phys::FixedTimestep(kTimeStep);
 }
 
@@ -131,8 +156,7 @@ void apply(App& app, Action action) {
             level.reset();
             app.paused = app.recorded = false;
             app.pull.reset();
-            app.fx.clear();
-            app.slow = 0;
+            restart_feel(app);
             app.timestep = phys::FixedTimestep(kTimeStep);
             break;
         case Action::Pause: app.paused = !app.paused; break;
@@ -208,6 +232,7 @@ void key(App& app, SDL_Keycode k) {
         case SDLK_TAB: apply(app, Action::Pause); break;
         case SDLK_H: apply(app, Action::Help); break;
         case SDLK_C: apply(app, Action::Contacts); break;
+        case SDLK_M: app.audio.muted = !app.audio.muted; break;
         case SDLK_N: apply(app, Action::Next); break;
         case SDLK_ESCAPE: apply(app, Action::Menu); break;
         default: break;
@@ -240,18 +265,47 @@ void handle_event(App& app, const SDL_Event& e) {
 void update(App& app, phys::Real frame_seconds) {
     // Paused, on the menu or reading the help: bank no time, so play resumes exactly where it stopped.
     if (!app.level || app.paused || app.show_help) return;
+    Level& level = *app.level;
     const float speed = app.slow > 0 && !app.scripted ? kSlowSpeed : 1.0f;
     app.slow = std::max(0.0f, app.slow - frame_seconds);
-    app.timestep.advance(frame_seconds * speed, [&](phys::Real) { app.level->step(); });
-    app.fx.update(*app.level, frame_seconds * speed);
-    if (app.level->status == Status::Won && !app.recorded) {
+    if (app.freeze > 0 && !app.scripted) {
+        app.freeze -= frame_seconds;  // the picture holds; nothing is banked, so nothing jumps after
+    } else {
+        app.timestep.advance(frame_seconds * speed, [&](phys::Real) { level.step(); });
+    }
+    const float dt = frame_seconds * speed;
+
+    // Hard hits and blasts shake the view; the hardest, a blast and a pig popping also freeze it.
+    Real hardest = 0;
+    for (; app.hits_seen < level.hits.size(); ++app.hits_seen) hardest = std::max(hardest, level.hits[app.hits_seen].impulse);
+    if (hardest > 2.5f) app.camera.shake(std::min(14.0f, hardest * 1.4f));
+    if (hardest > 9.0f) app.freeze = kFreezeTime;
+    for (; app.booms_seen < level.booms.size(); ++app.booms_seen) {
+        app.camera.shake(18.0f);
+        app.freeze = kFreezeTime * 1.4f;
+    }
+    for (; app.pops_seen < level.pops.size(); ++app.pops_seen)
+        if (level.pops[app.pops_seen].kind == Kind::Pig) app.freeze = std::max(app.freeze, kFreezeTime);
+
+    app.fx.update(level, dt);
+    app.sounds.update(level, app.audio, app.pull);
+    app.camera.update(level, app.pull.has_value(), dt);
+
+    if (level.status == Status::Won && !app.recorded) {
         app.recorded = true;
         app.slow = kSlowTime;
         // The birds left over each count up from the sling.
-        const Level& level = *app.level;
         for (int i = 0; i < level.shots_left(); ++i)
             app.fx.bird_bonus(level.layout().pouch + Vec2{0, 1.0f + 0.6f * static_cast<float>(i)}, Level::kBirdBonus);
-        if (app.progress.record(app.level->name(), app.level->stars(), app.level->score)) save_progress(app);
+        if (app.progress.record(level.name(), level.stars(), level.score)) save_progress(app);
+    }
+    // Once the panel is up, its stars come out one at a time, each with a chime.
+    if (level.status == Status::Won && app.slow <= 0 && app.stars_shown < level.stars()) {
+        app.star_clock -= frame_seconds;
+        if (app.star_clock <= 0) {
+            app.sounds.star(app.audio, app.stars_shown++);
+            app.star_clock = kStarGap;
+        }
     }
 }
 
@@ -304,7 +358,9 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
     }
     if (level.next_ammo()) text(ren, x, kBarHeight + 22.0f, 2.0f, color::kDim, "next: %s", ammo_props(*level.next_ammo()).name);
 
-    // The floor strip doubles as a footer: what to do now on the left, the counters on the right.
+    // The footer: what to do now on the left, the counters on the right. It has its own strip, since
+    // the floor under it moves when the camera does.
+    fill_rect(ren, {0, kFooterTop, width, static_cast<float>(kHeight) - kFooterTop}, color::kPanel);
     const std::string hint = level.hint();
     text(ren, 48.0f, kFooterTop + 8.0f, 2.0f, color::kText, "%s", hint.c_str());
     // The counters on the right, as many as fit beside the hint: the time goes first, then the best score.
@@ -331,6 +387,7 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
             "Tab    pause or resume",
             "N      next level, once solved",
             "C      show contact points",
+            "M      sound on or off",
             "Esc    close this, or back to the menu",
         };
         const float h = 110.0f + 30.0f * static_cast<float>(lines.size() + std::size(keys));
@@ -351,7 +408,7 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
         const SDL_FRect r{cx - 360.0f, 140.0f, 720.0f, 170.0f};
         draw_panel(ren, r, color::kGood);
         text_centered(ren, cx, r.y + 14.0f, 4.0f, color::kGood, "SOLVED!");
-        draw_stars(ren, cx, r.y + 78.0f, 16.0f, level.stars());
+        draw_stars(ren, cx, r.y + 78.0f, 16.0f, std::min(level.stars(), app.stars_shown));
         const std::string line = level.result() + ", try " + std::to_string(level.attempt);
         text_centered(ren, cx, r.y + 106.0f, 2.0f, color::kText, line.c_str());
         const bool last = app.index + 1 >= level_count();
@@ -388,13 +445,15 @@ void draw_menu(SDL_Renderer* ren, const App& app) {
     text_centered(ren, cx, 640.0f, 2.0f, color::kDim, "Click a level, or arrows and Enter.   Q quit");
 }
 
-void draw(SDL_Renderer* ren, const App& app) {
+void draw(SDL_Renderer* ren, App& app) {
     set_color(ren, color::kBackground);
     SDL_RenderClear(ren);
     if (!app.level) {
+        set_view({kWorldW * 0.5f, kWorldH * 0.5f}, kPixelsPerMeter);
         draw_menu(ren, app);
         return;
     }
+    app.camera.apply();
     draw_level(ren, *app.level, app.paused || app.show_help ? std::nullopt : app.pull, app.show_contacts, &app.fx);
     app.fx.draw_over(ren, *app.level, to_world(0, kBarHeight).y);
     draw_hud(ren, app);
@@ -421,7 +480,15 @@ bool run_script(App& app, SDL_Renderer* ren, int argc, char** argv) {
             if (app.level) app.level->fire(app.level->pull_for(deg * phys::kPi / 180.0f, speed));
         } else if (is(a, "--steps")) {
             const int n = static_cast<int>(number(++i));
-            for (int s = 0; s < n; ++s) update(app, kTimeStep * 1.0001f);
+            for (int s = 0; s < n; ++s) {
+                update(app, kTimeStep * 1.0001f);
+                app.audio.advance(kTimeStep);
+            }
+        } else if (is(a, "--sound") && i + 1 < argc) {
+            app.audio.record();
+            app.sound_path = argv[++i];
+        } else if (is(a, "--camera") && i + 1 < argc) {
+            app.camera.follow = !is(argv[++i], "off");
         } else if (is(a, "--key") && i + 1 < argc) {
             const char* k = argv[++i];
             key(app, is(k, "reset") ? SDLK_R : is(k, "pause") ? SDLK_TAB : is(k, "help") ? SDLK_H : is(k, "contacts") ? SDLK_C
@@ -446,7 +513,7 @@ bool run_script(App& app, SDL_Renderer* ren, int argc, char** argv) {
 }  // namespace
 
 int main(int argc, char** argv) {
-    if (!SDL_Init(SDL_INIT_VIDEO)) {
+    if (!SDL_Init(SDL_INIT_VIDEO | SDL_INIT_AUDIO)) {
         SDL_Log("SDL_Init failed: %s", SDL_GetError());
         return 1;
     }
@@ -464,8 +531,10 @@ int main(int argc, char** argv) {
     if (argc > 1) {
         app.scripted = true;
         result = run_script(app, renderer, argc, argv) ? 0 : 1;
+        if (!app.sound_path.empty() && !app.audio.save_wav(app.sound_path.c_str())) result = 1;
     } else {
         load_progress(app);
+        app.audio.open();
         Uint64 last = SDL_GetTicksNS();
         while (app.running) {
             SDL_Event e;
@@ -475,6 +544,7 @@ int main(int argc, char** argv) {
             last = now;
             draw(renderer, app);
             SDL_RenderPresent(renderer);
+            app.audio.pump();
         }
     }
 

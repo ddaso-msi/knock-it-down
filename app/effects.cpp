@@ -11,6 +11,7 @@ namespace {
 
 constexpr float kBitLife = 1.1f, kPointsLife = 1.2f;
 constexpr double kTrailEvery = 0.05;  // seconds of flight between trail dots
+constexpr float kSquashTime = 0.16f;
 
 }  // namespace
 
@@ -24,7 +25,9 @@ void Effects::clear() {
     points_.clear();
     trail_.clear();
     last_trail_.clear();
-    pops_seen_ = shots_seen_ = 0;
+    pops_seen_ = shots_seen_ = hits_seen_ = 0;
+    squash_.clear();
+    wobble_t_ = 10;
     last_mark_ = -1;
     level_time_ = 0;
 }
@@ -32,7 +35,8 @@ void Effects::clear() {
 void Effects::bird_bonus(Vec2 at, int value) { points_.push_back({at, value, kPointsLife * 1.5f, color::kTarget}); }
 
 void Effects::update(const Level& level, float dt) {
-    if (level.sim_time < level_time_ || level.pops.size() < pops_seen_ || level.shots.size() < shots_seen_) clear();  // reset
+    if (level.sim_time < level_time_ || level.pops.size() < pops_seen_ || level.shots.size() < shots_seen_ || level.hits.size() < hits_seen_)
+        clear();  // reset
     level_time_ = level.sim_time;
 
     // Each pop: a burst of bits in its colours, more for bigger things, and its points.
@@ -53,8 +57,24 @@ void Effects::update(const Level& level, float dt) {
 
     // The trail of the latest bird: a dot every so often while it is still flying (it stops once the
     // bird has slowed down). A new bird keeps the previous one's trail, fainter.
+    // A bird that hits something squashes for a moment.
+    for (; hits_seen_ < level.hits.size(); ++hits_seen_) {
+        const Level::Hit& h = level.hits[hits_seen_];
+        for (const auto& [body, s] : {std::pair{h.a, h.sa}, std::pair{h.b, h.sb}}) {
+            if (s != Level::Surface::Bird || h.impulse < 0.5f) continue;
+            std::erase_if(squash_, [&](const auto& q) { return q.first == body; });
+            squash_.push_back({body, kSquashTime});
+        }
+    }
+    for (auto& q : squash_) q.second -= dt;
+    std::erase_if(squash_, [](const auto& q) { return q.second <= 0; });
+    wobble_t_ += dt;
+
     if (level.shots.size() > shots_seen_) {
         shots_seen_ = level.shots.size();
+        const Body& bird = level.world.bodies[static_cast<size_t>(level.shots.back())];
+        wobble_t_ = 0;
+        wobble_dir_ = bird.vel.length() > 1e-3f ? bird.vel * (1 / bird.vel.length()) : Vec2{1, 0};
         last_trail_ = std::move(trail_);
         trail_.clear();
         last_mark_ = -1;
@@ -84,6 +104,17 @@ void Effects::update(const Level& level, float dt) {
         p.life -= dt;
     }
     std::erase_if(points_, [](const Points& p) { return p.life <= 0; });
+}
+
+float Effects::squash(int body) const {
+    for (const auto& q : squash_)
+        if (q.first == body) return q.second / kSquashTime;
+    return 0;
+}
+
+Vec2 Effects::sling_wobble() const {
+    // The bands overshoot the way the bird went and ring down in a third of a second.
+    return wobble_dir_ * (0.28f * std::exp(-wobble_t_ / 0.1f) * std::cos(wobble_t_ * 48.0f));
 }
 
 void Effects::draw_under(SDL_Renderer* ren) const {

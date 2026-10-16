@@ -139,7 +139,7 @@ Layout timber_yard() {
                "Darts are three times as hard on wood, and soft on stone."};
     l.ammo = {Dart, Dart, Ball};
     l.par = 2;
-    l.stars = {16000, 26000};
+    l.stars = {19000, 29000};
     for (const Real x : {11.4f, 12.41f}) column(l, Wood, x, kGround, 3, {0.5f, 0.5f});  // big, tough blocks
     pig(l, Small, 14.0f, kGround);
     pig(l, Helmet, 15.4f, kGround);

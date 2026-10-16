@@ -437,6 +437,53 @@ TEST(the_settle_clock_restarts_when_a_late_blast_goes_off) {
     CHECK(g.status == Status::Failed);
 }
 
+// ---- what the app hears and sees ----
+
+TEST(hard_impacts_are_logged_with_their_surfaces_and_gentle_ones_are_not) {
+    Layout l = one_pig();
+    column(l, Material::Stone, 10.0f, kFloorTop, 5, {0.35f, 0.35f});  // a resting stack: never heard
+    Level g(l);
+    run(g, 2.0);
+    CHECK(g.hits.empty());
+    CHECK(g.fire(g.pull_for(0.0f, 4.0f)));
+    Body& ball = g.world.bodies[static_cast<size_t>(g.shots[0])];
+    ball.pos = {5.0f, 3.0f};
+    ball.vel = {0, -6.0f};  // straight down onto the floor
+    run(g, 0.4);
+    CHECK(!g.hits.empty());
+    const Level::Hit& h = g.hits.front();
+    CHECK((h.sa == Level::Surface::Bird && h.sb == Level::Surface::Static) || (h.sb == Level::Surface::Bird && h.sa == Level::Surface::Static));
+    CHECK(h.impulse > 1.0f);
+    CHECK_NEAR(h.pos.x, 5.0, 0.05);
+    CHECK_NEAR(h.pos.y, kFloorTop, 0.05);
+    g.reset();
+    CHECK(g.hits.empty() && g.booms.empty() && g.powers_used.empty());
+}
+
+TEST(blasts_and_powers_are_logged) {
+    Level g(one_pig({Ammo::Dart, Ammo::Blast}));
+    CHECK(g.fire(g.pull_for(0.5f, 10.0f)));
+    CHECK(g.power());
+    CHECK(g.powers_used.size() == 1 && g.powers_used[0].kind == Ammo::Dart);
+    for (int i = 0; i < 600 && !g.can_fire(); ++i) g.step();
+    CHECK(g.fire(g.pull_for(0.5f, 10.0f)));
+    CHECK(g.power());
+    CHECK(g.booms.size() == 1);
+    if (!g.booms.empty()) CHECK_NEAR(g.booms[0].radius, Level::kBlastRadius, 1e-6);
+}
+
+TEST(a_high_lob_goes_up_and_comes_down_without_hitting_a_ceiling) {
+    Level g(one_pig());
+    CHECK(g.fire(g.pull_for(1.5707963f, 99.0f)));  // straight up, as hard as the sling throws
+    Real top = 0;
+    for (int i = 0; i < 120 * 3; ++i) {
+        g.step();
+        top = std::max(top, g.world.bodies[static_cast<size_t>(g.shots[0])].pos.y);
+    }
+    CHECK(top > kWorldH + 8.0f);  // far above the view, where the old ceiling was
+    for (const Level::Hit& h : g.hits) CHECK(h.pos.y < kWorldH);  // and it touched nothing up there
+}
+
 // ---- powers ----
 
 namespace {
