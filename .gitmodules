@@ -1,0 +1,3 @@
+[submodule "external/physics-engine"]
+	path = external/physics-engine
+	url = https://github.com/ddaso-msi/physics-engine.git
