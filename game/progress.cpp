@@ -31,6 +31,17 @@ int Progress::total_stars() const {
     return n;
 }
 
+bool unlocked(const Progress& p, const std::vector<std::string>& order, int index) {
+    if (index < 0 || index >= static_cast<int>(order.size())) return false;
+    return index == 0 || p.best(order[static_cast<size_t>(index - 1)]).stars > 0;
+}
+
+int next_to_play(const Progress& p, const std::vector<std::string>& order) {
+    for (int i = 0; i < static_cast<int>(order.size()); ++i)
+        if (p.best(order[static_cast<size_t>(i)]).stars == 0) return i;
+    return order.empty() ? 0 : static_cast<int>(order.size()) - 1;
+}
+
 std::string format_progress(const Progress& p) {
     std::string out;
     for (const auto& [name, b] : p.levels)

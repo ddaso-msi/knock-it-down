@@ -19,6 +19,7 @@
 //   --key NAME         reset, pause, help, contacts, next, escape
 //   --capture FILE     draw the current frame and save it as a BMP
 //   --camera off       keep the whole arena in view (the camera does not follow)
+//   --progress FILE    play as if this were the saved progress (read only: nothing is written back)
 //   --sound FILE       record what the game would play, from here on, and save it as a WAV at the end
 #include "audio.hpp"
 #include "camera.hpp"
@@ -100,6 +101,18 @@ SDL_FRect card_rect(int i) {
     const int col = i % kColumns, row = i / kColumns;
     return {60.0f + 236.0f * static_cast<float>(col), 220.0f + 128.0f * static_cast<float>(row), 216.0f, 112.0f};
 }
+// The level names in menu order, for the unlock rule (progress is kept by name).
+const std::vector<std::string>& level_names() {
+    static const std::vector<std::string> names = [] {
+        std::vector<std::string> n;
+        for (int i = 0; i < level_count(); ++i) n.push_back(make_layout(i).name);
+        return n;
+    }();
+    return names;
+}
+// Levels open one at a time (see kid::unlocked). The menu asks; a scripted run opens any level.
+bool level_open(const App& app, int i) { return unlocked(app.progress, level_names(), i); }
+
 bool inside(const SDL_FRect& r, float x, float y) { return x >= r.x && x < r.x + r.w && y >= r.y && y < r.y + r.h; }
 bool over_world(const App& app) { return app.mouse_y > kBarHeight && app.mouse_y < kFooterTop; }
 
@@ -183,7 +196,7 @@ void press(App& app, float x, float y) {
     app.mouse_y = y;
     if (!app.level) {
         for (int i = 0; i < level_count(); ++i)
-            if (inside(card_rect(i), x, y)) start_level(app, i);
+            if (inside(card_rect(i), x, y) && level_open(app, i)) start_level(app, i);
         return;
     }
     if (app.show_help) {  // any click dismisses the help and does nothing else
@@ -221,12 +234,12 @@ void key(App& app, SDL_Keycode k) {
     if (!app.level) {
         const int n = level_count();
         if (k == SDLK_Q) app.running = false;
-        if (k == SDLK_RETURN || k == SDLK_SPACE) start_level(app, app.index);
+        if ((k == SDLK_RETURN || k == SDLK_SPACE) && level_open(app, app.index)) start_level(app, app.index);
         if (k == SDLK_RIGHT) app.index = (app.index + 1) % n;
         if (k == SDLK_LEFT) app.index = (app.index + n - 1) % n;
         if (k == SDLK_DOWN) app.index = std::min(n - 1, app.index + kColumns);
         if (k == SDLK_UP) app.index = std::max(0, app.index - kColumns);
-        if (k >= SDLK_1 && k <= SDLK_9) start_level(app, static_cast<int>(k - SDLK_1));
+        if (k >= SDLK_1 && k <= SDLK_9 && level_open(app, static_cast<int>(k - SDLK_1))) start_level(app, static_cast<int>(k - SDLK_1));
         return;
     }
     switch (k) {
@@ -441,6 +454,17 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
     }
 }
 
+// A small padlock: a shackle over a body, centred at `c`.
+void draw_padlock(SDL_Renderer* ren, SDL_FPoint c, SDL_Color col) {
+    constexpr int kSides = 12;
+    for (int k = 0; k < kSides; ++k) {  // the shackle: an arch of short strokes
+        const float a0 = 3.14159265f * static_cast<float>(k) / kSides, a1 = 3.14159265f * static_cast<float>(k + 1) / kSides;
+        thick_line(ren, {c.x + 7.0f * std::cos(a0), c.y - 2.0f - 8.0f * std::sin(a0)}, {c.x + 7.0f * std::cos(a1), c.y - 2.0f - 8.0f * std::sin(a1)}, 2.5f, col);
+    }
+    fill_rect(ren, {c.x - 10.0f, c.y - 2.0f, 20.0f, 15.0f}, col);
+    fill_disc(ren, {c.x, c.y + 4.0f}, 2.2f, {6, 6, 10, 255});
+}
+
 void draw_menu(SDL_Renderer* ren, const App& app) {
     const float cx = static_cast<float>(kWidth) * 0.5f;
     draw_band(ren, 40.0f, 150.0f);
@@ -454,6 +478,14 @@ void draw_menu(SDL_Renderer* ren, const App& app) {
         const bool selected = i == app.index;
         const std::string name = make_layout(i).name;
         const Best best = app.progress.best(name);
+        if (!level_open(app, i)) {  // locked: dim, a padlock where the stars would be
+            fill_rect(ren, r, SDL_Color{6, 6, 10, selected ? Uint8(200) : Uint8(150)});
+            outline_rect(ren, r, SDL_Color{255, 220, 180, static_cast<Uint8>(selected ? 60 : 25)});
+            text(ren, r.x + 16.0f, r.y + 12.0f, 3.2f, {196, 178, 160, 70}, "%d", i + 1);
+            text(ren, r.x + 16.0f, r.y + 58.0f, 1.5f, {244, 232, 216, 70}, "%s", spaced(name).c_str());
+            draw_padlock(ren, {r.x + r.w - 40.0f, r.y + 30.0f}, {255, 220, 180, 110});
+            continue;
+        }
         fill_rect(ren, r, selected ? SDL_Color{24, 18, 16, 220} : SDL_Color{8, 8, 12, 190});
         outline_rect(ren, r, selected ? color::kTarget : SDL_Color{255, 220, 180, static_cast<Uint8>(best.stars > 0 ? 90 : 40)});
         text(ren, r.x + 16.0f, r.y + 12.0f, 3.2f, selected ? color::kTarget : color::kDim, "%d", i + 1);
@@ -461,7 +493,7 @@ void draw_menu(SDL_Renderer* ren, const App& app) {
         draw_stars(ren, r.x + r.w - 52.0f, r.y + 28.0f, 8.0f, best.stars);
         if (best.stars > 0) text(ren, r.x + 16.0f, r.y + 84.0f, 1.3f, color::kDim, "%s", spaced("best " + std::to_string(best.score)).c_str());
     }
-    text_centered(ren, cx, 640.0f, 1.5f, color::kDim, spaced("click a level, or arrows and enter.      q  quit").c_str());
+    text_centered(ren, cx, 640.0f, 1.5f, color::kDim, spaced("solve a level to open the next.      q  quit").c_str());
 }
 
 void draw(SDL_Renderer* ren, App& app) {
@@ -511,6 +543,12 @@ bool run_script(App& app, SDL_Renderer* ren, int argc, char** argv) {
         } else if (is(a, "--sound") && i + 1 < argc) {
             app.audio.record();
             app.sound_path = argv[++i];
+        } else if (is(a, "--progress") && i + 1 < argc) {
+            size_t size = 0;
+            void* data = SDL_LoadFile(argv[++i], &size);
+            app.progress = data ? parse_progress(std::string(static_cast<const char*>(data), size)) : Progress{};
+            SDL_free(data);
+            app.index = next_to_play(app.progress, level_names());
         } else if (is(a, "--camera") && i + 1 < argc) {
             app.camera.follow = !is(argv[++i], "off");
         } else if (is(a, "--key") && i + 1 < argc) {
@@ -564,6 +602,7 @@ int main(int argc, char** argv) {
         if (!app.sound_path.empty() && !app.audio.save_wav(app.sound_path.c_str())) result = 1;
     } else {
         load_progress(app);
+        app.index = next_to_play(app.progress, level_names());  // the menu opens on the level to play next
         app.audio.open();
         Uint64 last = SDL_GetTicksNS();
         while (app.running) {

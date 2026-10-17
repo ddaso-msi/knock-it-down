@@ -38,3 +38,31 @@ TEST(progress_skips_lines_that_do_not_parse) {
     CHECK(p.best("First Pig").stars == 3);
     CHECK(p.best("Bunker").score == 4000);
 }
+
+TEST(levels_unlock_one_at_a_time) {
+    const std::vector<std::string> order = {"One", "Two", "Three"};
+    Progress p;
+    CHECK(unlocked(p, order, 0));
+    CHECK(!unlocked(p, order, 1));
+    CHECK(!unlocked(p, order, 2));
+    CHECK(!unlocked(p, order, -1) && !unlocked(p, order, 3));
+    CHECK(next_to_play(p, order) == 0);
+    p.record("One", 1, 5000);  // any win opens the next level, one star is enough
+    CHECK(unlocked(p, order, 1));
+    CHECK(!unlocked(p, order, 2));
+    CHECK(next_to_play(p, order) == 1);
+    p.record("Three", 3, 9000);  // a later level's result (an old save) does not open the gap before it
+    CHECK(!unlocked(p, order, 2));
+    CHECK(next_to_play(p, order) == 1);
+    p.record("Two", 2, 7000);
+    CHECK(unlocked(p, order, 2));
+    CHECK(next_to_play(p, order) == 2);  // everything solved: offer the last level
+}
+
+TEST(unlocks_survive_saving_and_loading) {
+    const std::vector<std::string> order = {"One", "Two"};
+    Progress p;
+    p.record("One", 2, 5000);
+    const Progress q = parse_progress(format_progress(p));
+    CHECK(unlocked(q, order, 1));
+}

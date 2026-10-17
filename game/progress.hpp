@@ -3,6 +3,7 @@
 // where the file lives and reads and writes it.
 #include <map>
 #include <string>
+#include <vector>
 
 namespace kid {
 
@@ -20,6 +21,12 @@ struct Progress {
     Best best(const std::string& level) const;
     int total_stars() const;
 };
+
+// Levels open one at a time: the first is always open, and each later one once the level before it
+// in `order` (the level names, in menu order) has been solved.
+bool unlocked(const Progress& p, const std::vector<std::string>& order, int index);
+// The level to offer first: the earliest open one not solved yet, or the last level once all are.
+int next_to_play(const Progress& p, const std::vector<std::string>& order);
 
 // One line per solved level: "stars score name". Lines that do not parse are skipped, so a damaged
 // file costs at most the lines that are damaged.

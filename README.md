@@ -107,6 +107,9 @@ cmake --preset release && cmake --build --preset release
 build/release/knock_it_down
 ```
 
+Levels unlock one at a time: the first is open, and solving a level (any number of stars) opens
+the next. The menu starts on the next level to play.
+
 `R` resets, `Tab` pauses, `H` shows the help, `C` shows contact points, `M` mutes, `N` goes to the next level once
 solved, `Esc` lets a pulled bird back down, then goes back to the menu. Best results are saved per
 level.
