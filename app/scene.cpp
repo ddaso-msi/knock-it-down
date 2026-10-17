@@ -60,21 +60,6 @@ RoleColors body_colors(Role role, Material m) { return role == Role::Block ? wit
 
 namespace {
 
-// Lines across a damaged body: one below two thirds of its health, two below a third.
-void draw_cracks(SDL_Renderer* ren, const Body& b, Real condition) {
-    if (condition > 0.66f) return;
-    const Real r = b.shape.type == phys::Shape::Type::Circle ? b.shape.circle.radius * 0.8f
-                                                             : std::min(b.shape.polygon.vertices[2].x, b.shape.polygon.vertices[2].y) * 1.6f;
-    const auto at = [&](Real x, Real y) { return to_screen(b.pos + rotate(b.q, Vec2{x, y} * r)); };
-    set_color(ren, {40, 30, 24, 230});
-    const SDL_FPoint c1[] = {at(-0.6f, 0.5f), at(-0.1f, 0.05f), at(0.15f, 0.3f), at(0.6f, -0.2f)};
-    SDL_RenderLines(ren, c1, 4);
-    if (condition > 0.33f) return;
-    const SDL_FPoint c2[] = {at(-0.4f, -0.6f), at(0.0f, -0.15f), at(0.45f, -0.5f)};
-    SDL_RenderLines(ren, c2, 3);
-}
-
-
 void ring(SDL_Renderer* ren, Vec2 centre, Real radius, SDL_Color c) {
     constexpr int kSides = 48;
     SDL_FPoint pts[kSides + 1];
@@ -101,13 +86,10 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
     Vec2 look_at = level.layout().pouch;
     if (!level.shots.empty() && !level.popped(level.shots.back())) look_at = world.bodies[static_cast<size_t>(level.shots.back())].pos;
 
-    // Shadows first, under everything that moves.
-    for (size_t i = 0; i < world.bodies.size(); ++i)
-        if (world.bodies[i].type == phys::BodyType::Dynamic && level.role(i) != Role::Hidden) draw_shadow(ren, world.bodies[i]);
     // Ropes behind what hangs on them.
     for (const phys::Joint& j : world.joints)
         if (j.type == phys::JointType::Distance)
-            thick_line(ren, to_screen(j.world_anchor_a(world.bodies)), to_screen(j.world_anchor_b(world.bodies)), std::max(2.0f, to_pixels(0.05f)), {92, 70, 50, 255});
+            thick_line(ren, to_screen(j.world_anchor_a(world.bodies)), to_screen(j.world_anchor_b(world.bodies)), std::max(2.0f, to_pixels(0.04f)), kInk);
 
     for (size_t i = 0; i < world.bodies.size(); ++i) {
         const Role r = level.role(i);
@@ -118,19 +100,18 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
             const Real speed = b.vel.length();
             const Vec2 heading = speed > 0.5f ? b.vel * (1 / speed) : Vec2{1, 0};
             draw_bird(ren, b.pos, b.shape.circle.radius, heading, 1 + std::min<Real>(0.22f, speed / 90.0f), fx ? fx->squash(static_cast<int>(i)) : 0.0f,
-                      level.layout().ammo[static_cast<size_t>(level.shot_of(i))], r == Role::Egg);
+                      level.layout().ammo[static_cast<size_t>(level.shot_of(i))], r == Role::Egg, theme);
             continue;
         }
         if (r == Role::Scenery) draw_rock(ren, b, theme);
-        else if (r == Role::Pig) draw_pig(ren, b, *level.pig_kind(i), condition, look_at, level.sim_time, static_cast<unsigned>(i));
-        else draw_block(ren, b, level.material(i), condition, static_cast<unsigned>(i));
-        if (r != Role::Scenery) draw_cracks(ren, b, condition);
+        else if (r == Role::Pig) draw_pig(ren, b, *level.pig_kind(i), condition, look_at, level.sim_time, static_cast<unsigned>(i), theme);
+        else draw_block(ren, b, level.material(i), condition, static_cast<unsigned>(i), theme);
     }
     for (const phys::Joint& j : world.joints)  // pins on top
         if (j.type == phys::JointType::Revolute) {
             const SDL_FPoint a = to_screen(j.world_anchor_a(world.bodies));
-            fill_disc(ren, a, std::max(4.0f, to_pixels(0.1f)), {60, 60, 70, 255});
-            fill_disc(ren, a, std::max(2.0f, to_pixels(0.05f)), {180, 184, 196, 255});
+            fill_disc(ren, a, std::max(4.0f, to_pixels(0.1f)), kInk);
+            fill_disc(ren, a, std::max(2.0f, to_pixels(0.04f)), theme.sun);
         }
 
     // The birds still to come, waiting their turn on the ground behind the sling, hopping now and then.
@@ -145,7 +126,7 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
             const float hop = 0.25f * std::pow(std::max(0.0f, std::sin(phase)), 12.0f);
             const Vec2 at{x, kFloorTop + r + hop};
             x -= r + 0.04f;
-            draw_bird(ren, at, r, {1, 0}, 1, 0, ammo[k], false);
+            draw_bird(ren, at, r, {1, 0}, 1, 0, ammo[k], false, theme);
         }
     }
 
@@ -159,12 +140,12 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
         held = level.launch_point(p);
         held_radius = ammo_props(*next).radius;
     }
-    draw_sling(ren, pouch, held, held_radius, wobble);
+    draw_sling(ren, pouch, held, held_radius, wobble, theme);
     if (!pull && held) draw_sling_front(ren, pouch, held, wobble);
     if (next) {
         const Vec2 p = pull ? level.pull_to(pouch + *pull) : Vec2{};
         const Vec2 aim = p.length() > 1e-3f ? p * (-1 / p.length()) : Vec2{1, 0};
-        draw_bird(ren, *held, held_radius, aim, 1, 0, *next, false);
+        draw_bird(ren, *held, held_radius, aim, 1, 0, *next, false, theme);
     }
     // The front band crosses in front of the bird only while it is pulled; at rest it stays behind,
     // out of the bird's face.
@@ -185,20 +166,23 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
         }
     }
     for (const Overlay::Ring& r : marks.rings) {
-        const Uint8 alpha = static_cast<Uint8>(std::clamp(r.fade, 0.0f, 1.0f) * 255.0f);
-        if (r.radius > 1.0f) fill_disc(ren, to_screen(r.p), to_pixels(r.radius), {255, 150, 90, static_cast<Uint8>(alpha / 5)});  // blasts only
-        ring(ren, r.p, r.radius, {255, 200, 120, alpha});
-        ring(ren, r.p, r.radius * 0.97f, {255, 120, 90, alpha});
+        const float fade = std::clamp(r.fade, 0.0f, 1.0f);
+        if (r.radius > 1.0f) {  // a blast: the whole place lights up, then a hot white core
+            glow(ren, to_screen(r.p), to_pixels(r.radius * (2.4f - fade)), {255, 170, 90, static_cast<Uint8>(230 * fade)});
+            glow(ren, to_screen(r.p), to_pixels(r.radius * 0.6f), {255, 245, 220, static_cast<Uint8>(255 * fade)});
+        } else {  // a pop or a power: a small flash, and the ring round a bird whose power is ready
+            glow(ren, to_screen(r.p), to_pixels(r.radius * 1.5f), {255, 220, 170, static_cast<Uint8>(150 * fade)});
+            ring(ren, r.p, r.radius, {255, 220, 170, static_cast<Uint8>(200 * fade)});
+        }
     }
-    for (const Overlay::Dot& d : marks.dots) {
-        const float r = std::max(2.5f, to_pixels(d.radius));
-        fill_disc(ren, to_screen(d.p), r + 1.5f, {20, 24, 34, 200});  // a dark rim: readable on any sky
-        fill_disc(ren, to_screen(d.p), r, {250, 250, 252, 255});
+    for (const Overlay::Dot& d : marks.dots) {  // the path ahead, as a line of embers
+        const SDL_FPoint p = to_screen(d.p);
+        glow(ren, p, 9.0f, {255, 200, 140, 120});
+        fill_disc(ren, p, 2.2f, {255, 232, 196, 255});
     }
     for (const Overlay::Label& l : marks.labels) {
         const SDL_FPoint p = to_screen(l.p);
-        text(ren, p.x + 2.0f, p.y + 2.0f, 2.0f, {20, 24, 34, 220}, "%s", l.text.c_str());
-        text(ren, p.x, p.y, 2.0f, {250, 250, 252, 255}, "%s", l.text.c_str());
+        text(ren, p.x, p.y, 1.8f, {255, 232, 196, 230}, "%s", spaced(l.text).c_str());
     }
 
     if (show_contacts)
@@ -212,15 +196,24 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
             }
 }
 
-void draw_ammo_icon(SDL_Renderer* ren, SDL_FPoint centre, Ammo a, bool spent) {
+void draw_ammo_icon(SDL_Renderer* ren, SDL_FPoint centre, Ammo a, bool spent, const Theme& theme) {
     const float radius = ammo_props(a).radius * kPixelsPerMeter * 0.8f;
     if (spent) {
-        fill_disc(ren, centre, radius * 0.6f, {50, 56, 72, 200});
+        fill_disc(ren, centre, radius * 0.35f, {255, 232, 196, 60});
         return;
     }
-    // The same bird as in the world, drawn at this spot on the screen: map the spot back into the
-    // world at the current view, so draw_bird can do the rest.
-    draw_bird(ren, to_world(centre.x, centre.y), radius / view_scale(), {1, 0}, 1, 0, a, false);
+    // In the dark interface a silhouette would vanish, so here a bird is its colour: a small body, a
+    // beak, a dark eye.
+    (void)theme;
+    const SDL_Color c = bird_color(a);
+    const SDL_FPoint beak[3] = {{centre.x + radius * 0.8f, centre.y - radius * 0.25f}, {centre.x + radius * 1.45f, centre.y + radius * 0.05f},
+                                {centre.x + radius * 0.8f, centre.y + radius * 0.3f}};
+    const SDL_FPoint tail[3] = {{centre.x - radius * 0.7f, centre.y - radius * 0.3f}, {centre.x - radius * 1.5f, centre.y - radius * 0.1f},
+                                {centre.x - radius * 0.7f, centre.y + radius * 0.3f}};
+    fill_polygon(ren, tail, 3, {c.r, c.g, c.b, 160});
+    fill_disc(ren, centre, radius, {c.r, c.g, c.b, 220});
+    fill_polygon(ren, beak, 3, {255, 214, 150, 230});
+    fill_disc(ren, {centre.x + radius * 0.4f, centre.y - radius * 0.25f}, std::max(1.5f, radius * 0.16f), kInk);
 }
 
 }  // namespace kid::app

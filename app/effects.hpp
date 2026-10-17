@@ -34,7 +34,7 @@ private:
         Real angle, spin, size;
         float life, max_life;
         SDL_Color color;
-        int shape;  // 0 a chunk (stone), 1 a splinter (wood), 2 a shard (ice)
+        int shape;  // 0 a chunk (stone), 1 a splinter (wood), 2 a shard (ice), 3 an ember
     };
     struct Puff {  // smoke where a pig was
         Vec2 p;

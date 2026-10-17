@@ -90,10 +90,10 @@ struct BarButton {
     Action action;
 };
 constexpr BarButton kButtons[] = {
-    {{{636.0f, 10.0f, 136.0f, 36.0f}, "R Reset"}, Action::Reset},
-    {{{780.0f, 10.0f, 176.0f, 36.0f}, "Tab Pause"}, Action::Pause},
-    {{{964.0f, 10.0f, 120.0f, 36.0f}, "H Help"}, Action::Help},
-    {{{1092.0f, 10.0f, 168.0f, 36.0f}, "Esc Menu"}, Action::Menu},
+    {{{400.0f, 8.0f, 120.0f, 34.0f}, "R Reset"}, Action::Reset},
+    {{{524.0f, 8.0f, 130.0f, 34.0f}, "Tab Pause"}, Action::Pause},
+    {{{658.0f, 8.0f, 110.0f, 34.0f}, "H Help"}, Action::Help},
+    {{{772.0f, 8.0f, 120.0f, 34.0f}, "Esc Menu"}, Action::Menu},
 };
 
 SDL_FRect card_rect(int i) {
@@ -316,72 +316,83 @@ void update(App& app, phys::Real frame_seconds) {
 
 void draw_panel(SDL_Renderer* ren, const SDL_FRect& r, SDL_Color edge) {
     fill_rect(ren, r, color::kPanel);
-    outline_rect(ren, r, edge);
-    outline_rect(ren, {r.x + 1, r.y + 1, r.w - 2, r.h - 2}, edge);
+    outline_rect(ren, r, {edge.r, edge.g, edge.b, 120});
 }
 
-// `count` stars of which `lit` are filled, centred on (cx, cy).
+// A band across the whole window, dark in the middle and fading out above and below: where a result
+// or a message is written over the scene.
+void draw_band(SDL_Renderer* ren, float y, float h) {
+    const float w = static_cast<float>(kWidth);
+    gradient_rect(ren, {0, y - 40.0f, w, 40.0f}, {0, 0, 0, 0}, {6, 6, 10, 200});
+    fill_rect(ren, {0, y, w, h}, {6, 6, 10, 200});
+    gradient_rect(ren, {0, y + h, w, 40.0f}, {6, 6, 10, 200}, {0, 0, 0, 0});
+}
+
+// `count` stars of which `lit` are filled, centred on (cx, cy). Lit ones glow.
 void draw_stars(SDL_Renderer* ren, float cx, float cy, float size, int lit, int count = 3) {
     const float pitch = size * 2.4f;
     for (int i = 0; i < count; ++i) {
         const SDL_FPoint c{cx + (static_cast<float>(i) - static_cast<float>(count - 1) * 0.5f) * pitch, cy};
-        fill_star(ren, c, size, i < lit ? color::kTarget : SDL_Color{58, 64, 82, 255});
+        if (i < lit) glow(ren, c, size * 2.6f, {255, 180, 90, 110});
+        fill_star(ren, c, size, i < lit ? color::kTarget : SDL_Color{255, 232, 196, 45});
     }
 }
 
 void draw_hud(SDL_Renderer* ren, const App& app) {
     const Level& level = *app.level;
+    const Theme theme = theme_for(app.index);
     const float width = static_cast<float>(kWidth), cx = width * 0.5f;
-    fill_rect(ren, {0, 0, width, kBarHeight}, color::kPanel);
-    set_color(ren, color::kPanelEdge);
-    SDL_RenderLine(ren, 0, kBarHeight, width, kBarHeight);
+    // No bar: the scene runs to the top, darkened behind the words.
+    gradient_rect(ren, {0, 0, width, kBarHeight + 40.0f}, {6, 6, 10, 210}, {6, 6, 10, 0});
 
-    text(ren, 20.0f, 20.0f, 2.0f, color::kText, "%d %s", app.index + 1, level.name().c_str());
-    const char* mode = app.paused ? "PAUSED" : level.status == Status::Won ? "SOLVED" : level.status == Status::Failed ? "FAILED" : "PLAYING";
-    const SDL_Color mode_color = app.paused ? color::kTarget : level.status == Status::Won ? color::kGood : level.status == Status::Failed ? color::kBad : color::kText;
-    const SDL_FRect pill{460.0f, 12.0f, 140.0f, 32.0f};
-    outline_rect(ren, pill, mode_color);
-    text_centered(ren, pill.x + pill.w * 0.5f, 20.0f, 2.0f, mode_color, mode);
+    char name[96];
+    SDL_snprintf(name, sizeof(name), "%d   %s", app.index + 1, level.name().c_str());
+    text(ren, 32.0f, 16.0f, 2.0f, color::kText, "%s", spaced(name).c_str());
+    text(ren, 32.0f, 46.0f, 1.5f, color::kDim, "%s", spaced(level.layout().objective).c_str());
     for (const BarButton& b : kButtons) {
         Button button = b.button;
         if (b.action == Action::Pause && app.paused) button.label = "Tab Resume";
         draw_button(ren, button, button.hit(app.mouse_x, app.mouse_y));
     }
+    if (app.paused) text_centered(ren, cx, 50.0f, 1.6f, color::kTarget, spaced("paused").c_str());
 
-    text(ren, 20.0f, 60.0f, 2.0f, color::kDim, "%s", level.layout().objective.c_str());
-    const std::string stats = level.stats();
-    text(ren, width - 20.0f - text_width(stats.c_str(), 2.0f), 60.0f, 2.0f, color::kText, "%s", stats.c_str());
+    // Birds, pigs and score on the right: three columns, a small label over each number.
+    const auto column = [&](float right, const char* label, int value) {
+        const std::string l = spaced(label), v = std::to_string(value);
+        text(ren, right - text_width(l.c_str(), 1.3f), 14.0f, 1.3f, color::kDim, "%s", l.c_str());
+        text(ren, right - text_width(v.c_str(), 2.6f), 34.0f, 2.6f, color::kText, "%s", v.c_str());
+    };
+    column(width - 32.0f, "score", level.score);
+    column(width - 170.0f, "pigs", level.pigs_left);
+    column(width - 250.0f, "birds", level.shots_left());
 
-    // The shots, in firing order, just under the bar: the next one first and bright.
+    // The birds, in firing order, under the title: the next one first.
     const std::vector<Ammo>& ammo = level.layout().ammo;
-    fill_rect(ren, {0, kBarHeight, 44.0f * static_cast<float>(ammo.size()) + 190.0f, 60.0f}, {18, 21, 30, 140});
-    float x = 34.0f;
+    float x = 44.0f;
     for (size_t i = 0; i < ammo.size(); ++i) {
-        draw_ammo_icon(ren, {x, kBarHeight + 30.0f}, ammo[i], static_cast<int>(i) < level.shots_used());
-        x += 44.0f;
+        draw_ammo_icon(ren, {x, kBarHeight + 10.0f}, ammo[i], static_cast<int>(i) < level.shots_used(), theme);
+        x += 40.0f;
     }
-    if (level.next_ammo()) text(ren, x, kBarHeight + 22.0f, 2.0f, color::kDim, "next: %s", ammo_props(*level.next_ammo()).name);
+    if (level.next_ammo()) text(ren, x + 4.0f, kBarHeight + 4.0f, 1.4f, color::kDim, "%s", spaced(std::string("next: ") + ammo_props(*level.next_ammo()).name).c_str());
 
-    // The footer: what to do now on the left, the counters on the right. It has its own strip, since
-    // the floor under it moves when the camera does.
-    // No strip behind it: the ground and the birds waiting on it stay in view. A shadow keeps it readable.
+    // The footer: what to do now on the left, the counters on the right, straight on the ground.
     const std::string hint = level.hint();
-    text(ren, 50.0f, kFooterTop + 10.0f, 2.0f, {10, 12, 18, 220}, "%s", hint.c_str());
-    text(ren, 48.0f, kFooterTop + 8.0f, 2.0f, color::kText, "%s", hint.c_str());
+    text(ren, 48.0f, kFooterTop + 9.0f, 1.6f, color::kDim, "%s", spaced(hint).c_str());
     // The counters on the right, as many as fit beside the hint: the time goes first, then the best score.
     const Best best = app.progress.best(level.name());
     const int three = level.layout().stars.three;
     char counters[96];
-    const float room = width - 96.0f - text_width(hint.c_str(), 2.0f) - 32.0f;
+    const float room = width - 96.0f - text_width(spaced(hint).c_str(), 1.6f) - 32.0f;
+    std::string shown;
     for (int detail = 2; detail >= 0; --detail) {
         int n = SDL_snprintf(counters, sizeof(counters), "3 stars %d", three);
-        if (detail >= 1 && best.stars > 0) n += SDL_snprintf(counters + n, sizeof(counters) - static_cast<size_t>(n), "   Best %d", best.score);
-        n += SDL_snprintf(counters + n, sizeof(counters) - static_cast<size_t>(n), "   Try %d", level.attempt);
-        if (detail >= 2) SDL_snprintf(counters + n, sizeof(counters) - static_cast<size_t>(n), "   %5.1f s", level.sim_time);
-        if (text_width(counters, 2.0f) <= room) break;
+        if (detail >= 1 && best.stars > 0) n += SDL_snprintf(counters + n, sizeof(counters) - static_cast<size_t>(n), "   best %d", best.score);
+        n += SDL_snprintf(counters + n, sizeof(counters) - static_cast<size_t>(n), "   try %d", level.attempt);
+        if (detail >= 2) SDL_snprintf(counters + n, sizeof(counters) - static_cast<size_t>(n), "   %.1f s", level.sim_time);
+        shown = spaced(counters);
+        if (text_width(shown.c_str(), 1.6f) <= room) break;
     }
-    text(ren, width - 46.0f - text_width(counters, 2.0f), kFooterTop + 10.0f, 2.0f, {10, 12, 18, 220}, "%s", counters);
-    text(ren, width - 48.0f - text_width(counters, 2.0f), kFooterTop + 8.0f, 2.0f, color::kText, "%s", counters);
+    text(ren, width - 48.0f - text_width(shown.c_str(), 1.6f), kFooterTop + 9.0f, 1.6f, color::kDim, "%s", shown.c_str());
 
     if (app.show_help) {
         const std::vector<std::string> lines = level.help();
@@ -398,8 +409,8 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
         };
         const float h = 110.0f + 30.0f * static_cast<float>(lines.size() + std::size(keys));
         const SDL_FRect r{cx - 500.0f, 110.0f, 1000.0f, h};
-        draw_panel(ren, r, color::kToolEdge);
-        text_centered(ren, cx, r.y + 20.0f, 3.0f, color::kText, "HOW TO PLAY");
+        draw_panel(ren, r, color::kPanelEdge);
+        text_centered(ren, cx, r.y + 22.0f, 2.6f, color::kTarget, spaced("how to play").c_str());
         float y = r.y + 66.0f;
         for (const std::string& l : lines) {
             text(ren, r.x + 40.0f, y, 2.0f, color::kText, "%s", l.c_str());
@@ -409,51 +420,48 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
         for (const char* l : keys) {  // two columns: the key, then what it does (split at the first space)
             const std::string line = l;
             const size_t gap = line.find(' '), start = line.find_first_not_of(' ', gap);
-            text(ren, r.x + 40.0f, y, 2.0f, color::kText, "%s", line.substr(0, gap).c_str());
-            text(ren, r.x + 130.0f, y, 2.0f, color::kDim, "%s", start == std::string::npos ? "" : line.substr(start).c_str());
+            text(ren, r.x + 40.0f, y, 2.0f, color::kTarget, "%s", spaced(line.substr(0, gap)).c_str());
+            text(ren, r.x + 150.0f, y, 2.0f, color::kDim, "%s", start == std::string::npos ? "" : line.substr(start).c_str());
             y += 30.0f;
         }
     } else if (level.status == Status::Won && app.slow <= 0) {
-        const SDL_FRect r{cx - 360.0f, 140.0f, 720.0f, 170.0f};
-        draw_panel(ren, r, color::kGood);
-        text_centered(ren, cx, r.y + 14.0f, 4.0f, color::kGood, "SOLVED!");
-        draw_stars(ren, cx, r.y + 78.0f, 16.0f, std::min(level.stars(), app.stars_shown));
-        const std::string line = level.result() + ", try " + std::to_string(level.attempt);
-        text_centered(ren, cx, r.y + 106.0f, 2.0f, color::kText, line.c_str());
+        draw_band(ren, 170.0f, 170.0f);
+        text_centered(ren, cx, 184.0f, 4.0f, color::kTarget, spaced("solved").c_str());
+        draw_stars(ren, cx, 254.0f, 18.0f, std::min(level.stars(), app.stars_shown));
+        char line[96];
+        SDL_snprintf(line, sizeof(line), "score %d   %d bird%s   try %d", level.score, level.shots_used(), level.shots_used() == 1 ? "" : "s", level.attempt);
+        text_centered(ren, cx, 286.0f, 1.6f, color::kText, spaced(line).c_str());
         const bool last = app.index + 1 >= level_count();
-        text_centered(ren, cx, r.y + 138.0f, 2.0f, color::kDim, last ? "N menu   R play again" : "N next level   R play again");
+        text_centered(ren, cx, 314.0f, 1.4f, color::kDim, spaced(last ? "n  menu      r  play again" : "n  next level      r  play again").c_str());
     } else if (level.status == Status::Failed) {
-        const SDL_FRect r{cx - 360.0f, 140.0f, 720.0f, 112.0f};
-        draw_panel(ren, r, color::kBad);
-        text_centered(ren, cx, r.y + 14.0f, 3.0f, color::kBad, "NOT SOLVED");
-        text_centered(ren, cx, r.y + 50.0f, 2.0f, color::kText, hint.c_str());
-        text_centered(ren, cx, r.y + 80.0f, 2.0f, color::kDim, "R try again   Esc menu");
+        draw_band(ren, 190.0f, 120.0f);
+        text_centered(ren, cx, 204.0f, 3.2f, color::kBad, spaced("not solved").c_str());
+        text_centered(ren, cx, 258.0f, 1.6f, color::kText, spaced(hint).c_str());
+        text_centered(ren, cx, 286.0f, 1.4f, color::kDim, spaced("r  try again      esc  menu").c_str());
     }
 }
 
 void draw_menu(SDL_Renderer* ren, const App& app) {
     const float cx = static_cast<float>(kWidth) * 0.5f;
-    fill_rect(ren, {0, 36.0f, static_cast<float>(kWidth), 166.0f}, {18, 21, 30, 150});  // so the title reads against the sky
-    text_centered(ren, cx + 4.0f, 64.0f, 6.0f, {10, 12, 18, 200}, "SLING");
-    text_centered(ren, cx, 60.0f, 6.0f, color::kText, "SLING");
-    text_centered(ren, cx, 126.0f, 2.0f, color::kDim, "Pull back, aim, let go. Pop every pig.");
+    draw_band(ren, 40.0f, 150.0f);
+    text_centered(ren, cx, 52.0f, 7.0f, color::kText, spaced("sling").c_str());
+    text_centered(ren, cx, 132.0f, 1.6f, color::kDim, spaced("pull back.  let go.  bring it all down.").c_str());
     char total[48];
     SDL_snprintf(total, sizeof(total), "%d of %d stars", app.progress.total_stars(), 3 * level_count());
-    text_centered(ren, cx, 172.0f, 2.0f, color::kTarget, total);
+    text_centered(ren, cx, 166.0f, 1.6f, color::kTarget, spaced(total).c_str());
     for (int i = 0; i < level_count(); ++i) {
         const SDL_FRect r = card_rect(i);
         const bool selected = i == app.index;
         const std::string name = make_layout(i).name;
         const Best best = app.progress.best(name);
-        fill_rect(ren, r, selected ? SDL_Color{48, 56, 78, 255} : SDL_Color{33, 38, 52, 255});
-        outline_rect(ren, r, selected ? color::kToolEdge : best.stars > 0 ? color::kDoneEdge : color::kPanelEdge);
-        text(ren, r.x + 16.0f, r.y + 14.0f, 3.0f, color::kTarget, "%d", i + 1);
-        text(ren, r.x + 16.0f, r.y + 52.0f, 2.0f, color::kText, "%s", name.c_str());
-        draw_stars(ren, r.x + r.w - 52.0f, r.y + 28.0f, 9.0f, best.stars);
-        if (best.stars > 0) text(ren, r.x + 16.0f, r.y + 82.0f, 2.0f, color::kDim, "best %d", best.score);
+        fill_rect(ren, r, selected ? SDL_Color{24, 18, 16, 220} : SDL_Color{8, 8, 12, 190});
+        outline_rect(ren, r, selected ? color::kTarget : SDL_Color{255, 220, 180, static_cast<Uint8>(best.stars > 0 ? 90 : 40)});
+        text(ren, r.x + 16.0f, r.y + 12.0f, 3.2f, selected ? color::kTarget : color::kDim, "%d", i + 1);
+        text(ren, r.x + 16.0f, r.y + 58.0f, 1.5f, color::kText, "%s", spaced(name).c_str());
+        draw_stars(ren, r.x + r.w - 52.0f, r.y + 28.0f, 8.0f, best.stars);
+        if (best.stars > 0) text(ren, r.x + 16.0f, r.y + 84.0f, 1.3f, color::kDim, "%s", spaced("best " + std::to_string(best.score)).c_str());
     }
-    fill_rect(ren, {0, 626.0f, static_cast<float>(kWidth), 44.0f}, {18, 21, 30, 150});
-    text_centered(ren, cx, 640.0f, 2.0f, color::kText, "Click a level, or arrows and Enter.   Q quit");
+    text_centered(ren, cx, 640.0f, 1.5f, color::kDim, spaced("click a level, or arrows and enter.      q  quit").c_str());
 }
 
 void draw(SDL_Renderer* ren, App& app) {
@@ -463,12 +471,14 @@ void draw(SDL_Renderer* ren, App& app) {
         set_view({kWorldW * 0.5f, kWorldH * 0.5f}, kPixelsPerMeter);
         draw_backdrop(ren, theme_for(0), static_cast<double>(SDL_GetTicks()) / 1000.0);
         draw_ground(ren, theme_for(0));
+        draw_vignette(ren);
         draw_menu(ren, app);
         return;
     }
     app.camera.apply();
     draw_level(ren, *app.level, app.paused || app.show_help ? std::nullopt : app.pull, app.show_contacts, &app.fx, theme_for(app.index));
-    app.weather.draw(ren);
+    app.weather.draw(ren, theme_for(app.index));
+    draw_vignette(ren);
     app.fx.draw_over(ren, *app.level, to_world(0, kBarHeight).y);
     draw_hud(ren, app);
 }
@@ -540,8 +550,10 @@ int main(int argc, char** argv) {
     }
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     set_pixel_density(renderer, SDL_GetWindowPixelDensity(window));  // crisp on a Retina screen
-    // A rounded face from the system if there is one (nothing is shipped with the game).
-    load_font({"/System/Library/Fonts/Supplemental/Arial Rounded Bold.ttf", "/System/Library/Fonts/Supplemental/Verdana Bold.ttf",
+    // A condensed face from the system if there is one, for letter-spaced capitals (nothing is shipped
+    // with the game).
+    load_font({"/System/Library/Fonts/Supplemental/DIN Condensed Bold.ttf", "/System/Library/Fonts/Supplemental/DIN Alternate Bold.ttf",
+               "/System/Library/Fonts/Supplemental/Arial Rounded Bold.ttf",
                "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "C:/Windows/Fonts/arialbd.ttf"});
 
     App app;

@@ -47,7 +47,7 @@ void Effects::update(const Level& level, float dt) {
         if (pop.kind == Kind::Pig)  // a pig goes in a puff of smoke
             for (int k = 0; k < 7; ++k)
                 puffs_.push_back({pop.pos + Vec2{random() - 0.5f, random() - 0.5f} * (pop.size * 1.2f), pop.size * (0.5f + 0.5f * random()), 0.6f + 0.3f * random()});
-        const SDL_Color fill = pop.kind == Kind::Pig ? SDL_Color{126, 200, 98, 255} : material_color(pop.material);
+        const SDL_Color fill = pop.kind == Kind::Pig ? kInk : material_color(pop.material);
         const RoleColors c{fill, SDL_Color{static_cast<Uint8>(fill.r * 3 / 4), static_cast<Uint8>(fill.g * 3 / 4), static_cast<Uint8>(fill.b * 3 / 4), fill.a}};
         const int shape = pop.kind == Kind::Pig ? 0 : pop.material == Material::Wood ? 1 : pop.material == Material::Ice ? 2 : 0;
         const int count = (pop.kind == Kind::Pig ? 3 : 6) + static_cast<int>(pop.size * 14.0f);
@@ -57,9 +57,9 @@ void Effects::update(const Level& level, float dt) {
             const Vec2 offset = Vec2{random() - 0.5f, random() - 0.5f} * (pop.size * 1.4f);
             const float life = kBitLife * (0.6f + 0.4f * random());
             bits_.push_back({pop.pos + offset, v, random() * 3.0f, (random() - 0.5f) * 12.0f, 0.04f + random() * pop.size * 0.14f, life, life,
-                             random() < 0.3f ? c.edge : c.fill, shape});
+                             random() < 0.3f ? c.edge : c.fill, random() < 0.3f ? 3 : shape});  // some of it flies off burning
         }
-        points_.push_back({pop.pos + Vec2{0, pop.size + 0.2f}, pop.points, kPointsLife, pop.kind == Kind::Pig ? color::kGood : color::kText});
+        points_.push_back({pop.pos + Vec2{0, pop.size + 0.2f}, pop.points, kPointsLife, pop.kind == Kind::Pig ? color::kTarget : color::kText});
     }
 
     // The trail of the latest bird: a dot every so often while it is still flying (it stops once the
@@ -131,8 +131,8 @@ Vec2 Effects::sling_wobble() const {
 }
 
 void Effects::draw_under(SDL_Renderer* ren) const {
-    for (const Vec2 p : last_trail_) fill_disc(ren, to_screen(p), 2.0f, {200, 206, 222, 70});
-    for (const Vec2 p : trail_) fill_disc(ren, to_screen(p), 2.5f, {220, 226, 240, 150});
+    for (const Vec2 p : last_trail_) fill_disc(ren, to_screen(p), 1.8f, {255, 220, 180, 60});
+    for (const Vec2 p : trail_) fill_disc(ren, to_screen(p), 2.2f, {255, 220, 180, 140});
 }
 
 void Effects::draw_over(SDL_Renderer* ren, const Level& level, float top_of_view) const {
@@ -140,6 +140,11 @@ void Effects::draw_over(SDL_Renderer* ren, const Level& level, float top_of_view
         SDL_Color c = b.color;
         c.a = static_cast<Uint8>(std::clamp(b.life / (b.max_life * 0.4f), 0.0f, 1.0f) * static_cast<float>(c.a));
         const Vec2 ax{std::cos(b.angle) * b.size, std::sin(b.angle) * b.size}, ay{-ax.y, ax.x};
+        if (b.shape == 3) {  // an ember: a glowing point that dims as it falls
+            glow(ren, to_screen(b.p), to_pixels(b.size * 3.0f), {255, 160, 80, c.a});
+            fill_disc(ren, to_screen(b.p), std::max(1.5f, to_pixels(b.size * 0.6f)), {255, 230, 180, c.a});
+            continue;
+        }
         if (b.shape == 2) {  // a shard: a thin triangle
             const SDL_FPoint tri[3] = {to_screen(b.p + ax * 1.6f), to_screen(b.p - ax + ay * 0.5f), to_screen(b.p - ax - ay * 0.5f)};
             fill_polygon(ren, tri, 3, c);
@@ -150,14 +155,14 @@ void Effects::draw_over(SDL_Renderer* ren, const Level& level, float top_of_view
         fill_polygon(ren, pts, 4, c);
     }
     for (const Puff& p : puffs_)
-        fill_disc(ren, to_screen(p.p), to_pixels(p.size), {236, 240, 232, static_cast<Uint8>(std::clamp(p.life / 0.6f, 0.0f, 1.0f) * 150.0f)});
+        fill_disc(ren, to_screen(p.p), to_pixels(p.size), {20, 18, 22, static_cast<Uint8>(std::clamp(p.life / 0.6f, 0.0f, 1.0f) * 170.0f)});  // dark smoke
     for (const Points& p : points_) {
         SDL_Color c = p.color;
         c.a = static_cast<Uint8>(std::clamp(p.life / (kPointsLife * 0.5f), 0.0f, 1.0f) * 255.0f);
         char buf[16];
-        SDL_snprintf(buf, sizeof(buf), "+%d", p.value);
+        SDL_snprintf(buf, sizeof(buf), "%d", p.value);
         const SDL_FPoint s = to_screen(p.p);
-        text_centered(ren, s.x, s.y, 2.0f, c, buf);
+        text_centered(ren, s.x, s.y, 1.8f, c, spaced(buf).c_str());
     }
     // A bird above the top of the view: a marker just under the bar, and how high it is.
     for (size_t i = 0; i < level.world.bodies.size(); ++i) {

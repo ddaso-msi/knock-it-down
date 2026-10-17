@@ -43,17 +43,19 @@ names and the look are our own.
 
 What you see and hear on top of the physics is only drawn and played: the simulation and the
 recorded solutions are untouched by it.
-- **The world** has a sky gradient, a sun, drifting clouds, and two layers of hills that move
-  with the camera at their own depth. There are three themes: a meadow (levels 1-5), snow with
-  falling flakes (6-10), and dusk with castle silhouettes (11-15).
-- **Blocks** are shaded with their lit top edge and a shadow beneath. Wood has grain and knots,
-  stone is speckled with a bevel, and ice is glassy with glints. Static scenery is rock.
-- **Pigs** have ears and snouts. Their eyes follow the bird, they blink, and they wince when hurt.
-  The helmet pig has a steel cap and the big pig a moustache.
-- **Birds** have eyes, a stern brow, a beak and tail feathers. The bomber has a lit fuse, the dart a
-  crest, and the dropper a tuft. The egg is speckled.
-- **Debris** takes its shape from the material (wood splinters, ice shards, stone chunks), and a
-  popped pig goes in a puff of smoke.
+- **The look is backlit silhouettes.** The sky glows low behind the target, the hills fade into
+  layers of haze (moving with the camera at their own depth), and everything solid is drawn dark,
+  rimmed with light on the side facing the sun. There are three moods: amber dusk (levels 1-5), a
+  cold moonlit night with snow (6-10), and embers at the castle with sparks rising (11-15).
+- **Colour is kept for what matters.** The pigs' eyes glow and burn orange when they are hurt.
+  Each bird has one bright eye and a streak in its kind's colour. Ice is the one glassy thing.
+  Cracks glow like embers, and a blast floods the scene with light.
+- **Materials stay readable in the dark.** Wood is near-black brown with faint grain, stone is
+  slate with chips that catch the light, and ice is a cold translucent tint with a bright rim.
+- **Debris:** wood splinters, ice shards, stone chunks and burning embers; a popped pig goes up in
+  dark smoke.
+- **The interface:** letter-spaced capitals in DIN Condensed (from the system), no panels, darkened
+  edges.
 - It draws at the window's full pixel density, so it is sharp on a Retina screen.
 - **The camera** shows the whole arena while you aim. Once a bird is away it frames the bird
   together with everything still standing, moving in as close as that allows. It holds on the crash,

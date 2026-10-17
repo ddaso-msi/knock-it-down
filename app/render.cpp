@@ -8,6 +8,7 @@
 #include <string>
 #endif
 
+#include <cctype>
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -260,15 +261,26 @@ float text_width(const char* str, float scale) {
     return static_cast<float>(std::strlen(str)) * SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE * scale;
 }
 
+std::string spaced(const std::string& s) {
+    std::string out;
+    for (const char ch : s) {
+        out += static_cast<char>(std::toupper(static_cast<unsigned char>(ch)));
+        out += ' ';
+    }
+    if (!out.empty()) out.pop_back();
+    return out;
+}
+
 void text_centered(SDL_Renderer* ren, float cx, float y, float scale, SDL_Color c, const char* str) {
     text(ren, cx - text_width(str, scale) * 0.5f, y, scale, c, "%s", str);
 }
 
 void draw_button(SDL_Renderer* ren, const Button& b, bool hovered, bool enabled) {
-    fill_rect(ren, b.rect, hovered && enabled ? SDL_Color{52, 60, 82, 255} : SDL_Color{36, 41, 56, 255});
-    outline_rect(ren, b.rect, hovered && enabled ? color::kToolEdge : color::kPanelEdge);
-    text_centered(ren, b.rect.x + b.rect.w * 0.5f, b.rect.y + (b.rect.h - 16.0f) * 0.5f, 2.0f,
-                  enabled ? color::kText : color::kDim, b.label);
+    // Just the words, spaced; a thin line under them when the pointer is on them.
+    const std::string label = spaced(b.label);
+    const SDL_Color c = !enabled ? SDL_Color{196, 178, 160, 90} : hovered ? color::kTarget : color::kDim;
+    text_centered(ren, b.rect.x + b.rect.w * 0.5f, b.rect.y + (b.rect.h - 16.0f) * 0.5f, 1.6f, c, label.c_str());
+    if (hovered && enabled) fill_rect(ren, {b.rect.x + 14.0f, b.rect.y + b.rect.h - 6.0f, b.rect.w - 28.0f, 1.5f}, color::kTarget);
 }
 
 }  // namespace kid::app

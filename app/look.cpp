@@ -16,9 +16,7 @@ SDL_Color mix(SDL_Color a, SDL_Color b, float t) {
     const auto m = [t](Uint8 x, Uint8 y) { return static_cast<Uint8>(static_cast<float>(x) + (static_cast<float>(y) - static_cast<float>(x)) * t); };
     return {m(a.r, b.r), m(a.g, b.g), m(a.b, b.b), m(a.a, b.a)};
 }
-SDL_Color with_alpha(SDL_Color c, Uint8 a) { return {c.r, c.g, c.b, a}; }
-SDL_Color lighter(SDL_Color c, float t) { return mix(c, {255, 255, 255, c.a}, t); }
-SDL_Color darker(SDL_Color c, float t) { return mix(c, {0, 0, 0, c.a}, t); }
+SDL_Color with_alpha(SDL_Color c, float a) { return {c.r, c.g, c.b, static_cast<Uint8>(std::clamp(a, 0.0f, 255.0f))}; }
 
 // A small, repeatable random number from a seed and an index, in [0, 1).
 float hashf(unsigned seed, unsigned i) {
@@ -47,10 +45,6 @@ void fill_ellipse(SDL_Renderer* ren, Vec2 centre, Vec2 along, Real a, Real b, SD
     fill_polygon(ren, pts, kSides, c);
 }
 
-void outline(SDL_Renderer* ren, const SDL_FPoint* pts, int n, float width, SDL_Color c) {
-    for (int i = 0; i < n; ++i) thick_line(ren, pts[i], pts[(i + 1) % n], width, c);
-}
-
 // A box body's four corners in world coordinates, counter-clockwise, and its half extents.
 void corners(const Body& b, Vec2 out[4], Vec2& half) {
     const phys::Polygon& p = b.shape.polygon;
@@ -58,64 +52,108 @@ void corners(const Body& b, Vec2 out[4], Vec2& half) {
     for (int i = 0; i < 4; ++i) out[i] = apply(b.transform(), p.vertices[i]);
 }
 
-// A gentle silhouette of hills: the sum of a few sines, sampled across the view.
-void hills(SDL_Renderer* ren, float base, float height, float depth, unsigned seed, SDL_Color top, SDL_Color bottom) {
+// Rim light: each edge of a box glows in proportion to how squarely it faces the light.
+void rim_box(SDL_Renderer* ren, const Vec2 v[4], Vec2 light, SDL_Color c, float strength = 1) {
+    const float w = std::max(1.5f, to_pixels(0.035f));
+    for (int i = 0; i < 4; ++i) {
+        const Vec2 a = v[i], b = v[(i + 1) % 4], e = b - a;
+        const float len = e.length();
+        if (len < 1e-4f) continue;
+        const Vec2 n{e.y / len, -e.x / len};  // outward: the polygon is counter-clockwise
+        Vec2 to = light - (a + b) * 0.5f;
+        to = to * (1 / std::max(0.01f, to.length()));
+        const float lit = dot(n, to);
+        if (lit > 0.15f) thick_line(ren, to_screen(a), to_screen(b), w, with_alpha(c, (60 + 190 * lit) * strength));
+    }
+}
+
+// The same for a disc: an arc of light on the side towards the sun.
+void rim_disc(SDL_Renderer* ren, Vec2 centre, Real r, Vec2 light, SDL_Color c) {
+    Vec2 to = light - centre;
+    to = to * (1 / std::max(0.01f, to.length()));
+    const float facing = std::atan2(to.y, to.x), w = std::max(1.5f, to_pixels(0.035f));
+    for (int k = -5; k < 5; ++k) {
+        const float a0 = facing + static_cast<float>(k) * 0.13f, a1 = a0 + 0.13f;
+        const float strength = 1 - std::fabs(static_cast<float>(k) + 0.5f) / 5.5f;
+        thick_line(ren, to_screen(centre + Vec2{std::cos(a0), std::sin(a0)} * r), to_screen(centre + Vec2{std::cos(a1), std::sin(a1)} * r), w,
+                   with_alpha(c, 230 * strength));
+    }
+}
+
+void hills(SDL_Renderer* ren, float base, float height, float depth, unsigned seed, SDL_Color fill) {
     // Parallax: a far layer moves only `depth` as much as the world when the camera pans.
     const Vec2 centre = view_centre();
     const float shift = (centre.x - kWorldW * 0.5f) * (1 - depth);
-    constexpr int kSteps = 64;
+    constexpr int kSteps = 72;
     const float x0 = -4, x1 = kWorldW + 4;
     for (int i = 0; i < kSteps; ++i) {
         const float xa = x0 + (x1 - x0) * static_cast<float>(i) / kSteps, xb = x0 + (x1 - x0) * static_cast<float>(i + 1) / kSteps;
         const auto h = [&](float x) {
-            return base + height * (0.55f + 0.25f * std::sin(x * 0.31f + hashf(seed, 1) * 6) + 0.15f * std::sin(x * 0.83f + hashf(seed, 2) * 6) +
-                                    0.05f * std::sin(x * 2.1f + hashf(seed, 3) * 6));
+            return base + height * (0.5f + 0.3f * std::sin(x * 0.4f + hashf(seed, 1) * 6) + 0.15f * std::sin(x * 1.3f + hashf(seed, 2) * 6) +
+                                    0.05f * std::sin(x * 3.1f + hashf(seed, 3) * 6));
         };
-        const SDL_FPoint ta = to_screen({xa + shift, h(xa)}), tb = to_screen({xb + shift, h(xb)});
-        const SDL_FPoint ba = to_screen({xa + shift, -2}), bb = to_screen({xb + shift, -2});
-        quad(ren, ta, tb, bb, ba, top, top, bottom, bottom);
+        quad(ren, to_screen({xa + shift, h(xa)}), to_screen({xb + shift, h(xb)}), to_screen({xb + shift, -2}), to_screen({xa + shift, -2}), fill, fill, fill,
+             fill);
     }
 }
 
-void castle(SDL_Renderer* ren, float x, float width, float height, SDL_Color c) {
-    const Vec2 centre = view_centre();
-    const float shift = (centre.x - kWorldW * 0.5f) * 0.7f;  // a far layer: depth 0.3
+// A band of haze lying over everything below `top`, thickest at `bottom`.
+void haze(SDL_Renderer* ren, float top, float bottom, SDL_Color c, float alpha) {
+    const float y0 = to_screen({0, top}).y, y1 = to_screen({0, bottom}).y, w = static_cast<float>(kWidth);
+    quad(ren, {0, y0}, {w, y0}, {w, y1}, {0, y1}, with_alpha(c, 0), with_alpha(c, 0), with_alpha(c, alpha), with_alpha(c, alpha));
+}
+
+void castle(SDL_Renderer* ren, float x, float width, float height, float depth, SDL_Color c) {
+    const float shift = (view_centre().x - kWorldW * 0.5f) * (1 - depth);
     const auto box = [&](float x0, float y0, float x1, float y1) {
         const SDL_FPoint a = to_screen({x0 + shift, y1}), b = to_screen({x1 + shift, y0});
         fill_rect(ren, {a.x, a.y, b.x - a.x, b.y - a.y}, c);
     };
-    box(x, 0, x + width, height);  // the keep
-    for (int k = 0; k < 4; ++k) {  // battlements
+    box(x, 0, x + width, height);  // the keep, battlements, towers either side
+    for (int k = 0; k < 4; ++k) {
         const float bx = x + width * (static_cast<float>(k) + 0.1f) / 4.0f;
         box(bx, height, bx + width * 0.14f, height + 0.35f);
     }
-    box(x - 0.6f, 0, x, height * 1.35f);  // towers either side
+    box(x - 0.6f, 0, x, height * 1.35f);
     box(x + width, 0, x + width + 0.6f, height * 1.2f);
+    box(x - 0.45f, height * 1.35f, x - 0.15f, height * 1.35f + 0.5f);
 }
 
 }  // namespace
 
 Theme theme_for(int level_index) {
-    if (level_index >= 10)  // dusk at the castle
-        return {{52, 36, 84, 255},   {236, 146, 104, 255}, {255, 196, 128, 255}, {120, 86, 120, 200}, {84, 56, 92, 255},
-                {54, 52, 66, 255},   {86, 112, 62, 255},  {70, 54, 44, 255},    {104, 96, 104, 255}, {62, 56, 66, 255},
-                false, true, 4.0f};
-    if (level_index >= 5)  // snow
-        return {{108, 140, 186, 255}, {218, 230, 244, 255}, {255, 250, 230, 255}, {244, 248, 255, 220}, {198, 212, 230, 255},
-                {168, 188, 212, 255}, {236, 242, 250, 255}, {146, 156, 174, 255}, {136, 144, 160, 255}, {84, 92, 108, 255},
-                true, false, 8.0f};
-    return {{82, 146, 214, 255},  {196, 228, 246, 255}, {255, 242, 184, 255}, {255, 255, 255, 220}, {132, 182, 150, 255},
-            {96, 156, 98, 255},   {112, 174, 72, 255},  {124, 92, 60, 255},   {138, 132, 124, 255}, {82, 78, 72, 255},
-            false, false, 8.5f};
+    Theme t;
+    if (level_index >= 10) {  // embers at the castle: a red sky, a huge low sun, sparks rising
+        t = {{16, 8, 12, 255}, {74, 24, 26, 255}, {214, 86, 44, 255}, {255, 160, 90, 255}, {200, 80, 44, 255}, {255, 214, 120, 255}, {13.8f, 2.4f}, 1.3f};
+        t.castles = t.embers = true;
+    } else if (level_index >= 5) {  // a cold night under a full moon, snowing
+        t = {{6, 10, 22, 255}, {28, 46, 78, 255}, {104, 146, 184, 255}, {226, 238, 255, 255}, {120, 160, 196, 255}, {150, 255, 170, 255}, {15.2f, 6.0f}, 0.75f};
+        t.snow = true;
+    } else {  // amber dusk, the sun just behind the target
+        t = {{22, 18, 34, 255}, {96, 52, 64, 255}, {232, 140, 84, 255}, {255, 214, 150, 255}, {232, 140, 84, 255}, {170, 255, 120, 255}, {14.6f, 3.2f}, 1.0f};
+    }
+    return t;
 }
 
 SDL_Color material_color(Material m) {
     switch (m) {
-        case Material::Wood: return {176, 124, 72, 255};
-        case Material::Stone: return {150, 150, 158, 255};
-        case Material::Ice: return {178, 222, 244, 220};
+        case Material::Wood: return {46, 30, 22, 255};
+        case Material::Stone: return {34, 36, 44, 255};
+        case Material::Ice: return {120, 190, 220, 220};
     }
-    return {176, 124, 72, 255};
+    return {46, 30, 22, 255};
+}
+
+SDL_Color bird_color(Ammo kind) {
+    switch (kind) {
+        case Ammo::Ball: return {90, 170, 255, 255};
+        case Ammo::Heavy: return {150, 150, 255, 255};
+        case Ammo::Blast: return {255, 90, 70, 255};
+        case Ammo::Split: return {80, 230, 220, 255};
+        case Ammo::Dart: return {255, 210, 80, 255};
+        case Ammo::Dropper: return {240, 240, 255, 255};
+    }
+    return {90, 170, 255, 255};
 }
 
 void thick_line(SDL_Renderer* ren, SDL_FPoint a, SDL_FPoint b, float width, SDL_Color c) {
@@ -125,71 +163,85 @@ void thick_line(SDL_Renderer* ren, SDL_FPoint a, SDL_FPoint b, float width, SDL_
     quad(ren, {a.x + nx, a.y + ny}, {b.x + nx, b.y + ny}, {b.x - nx, b.y - ny}, {a.x - nx, a.y - ny}, c, c, c, c);
 }
 
+void glow(SDL_Renderer* ren, SDL_FPoint centre, float radius, SDL_Color inner) {
+    constexpr int kSides = 40;
+    SDL_Vertex v[kSides + 1];
+    int idx[kSides * 3];
+    v[0] = {centre, fc(inner), {0, 0}};
+    for (int i = 0; i < kSides; ++i) {
+        const float a = 2 * kPi * static_cast<float>(i) / kSides;
+        v[i + 1] = {{centre.x + radius * std::cos(a), centre.y + radius * std::sin(a)}, fc(with_alpha(inner, 0)), {0, 0}};
+        idx[i * 3] = 0;
+        idx[i * 3 + 1] = i + 1;
+        idx[i * 3 + 2] = (i + 1) % kSides + 1;
+    }
+    SDL_RenderGeometry(ren, nullptr, v, kSides + 1, idx, kSides * 3);
+}
+
 void draw_backdrop(SDL_Renderer* ren, const Theme& t, double time) {
-    // The sky: one tall gradient behind everything, from the top of the arena to the ground.
-    const SDL_FPoint top_l = to_screen({-4, kWorldH + 4}), top_r = to_screen({kWorldW + 4, kWorldH + 4});
-    const SDL_FPoint low_l = to_screen({-4, kFloorTop}), low_r = to_screen({kWorldW + 4, kFloorTop});
-    fill_rect(ren, {0, 0, static_cast<float>(kWidth), static_cast<float>(kHeight)}, t.sky_low);
-    quad(ren, top_l, top_r, low_r, low_l, t.sky_top, t.sky_top, t.sky_low, t.sky_low);
-
-    // The sun with a soft glow, far away (it hardly moves with the camera).
-    const Vec2 centre = view_centre();
-    const Vec2 sun{15.5f + (centre.x - kWorldW * 0.5f) * 0.9f, t.sun_height};
-    for (int r = 6; r >= 1; --r) fill_disc(ren, to_screen(sun), to_pixels(0.45f + 0.28f * static_cast<float>(r)), with_alpha(t.sun, static_cast<Uint8>(14 + 4 * (6 - r))));
-    fill_disc(ren, to_screen(sun), to_pixels(0.55f), t.sun);
-
-    // Clouds drifting slowly to the right, wrapping round.
-    for (unsigned k = 0; k < 5; ++k) {
-        const float speed = 0.15f + 0.1f * hashf(7, k), span = kWorldW + 8;
-        const float x = std::fmod(hashf(3, k) * span + static_cast<float>(time) * speed, span) - 4 + (centre.x - kWorldW * 0.5f) * 0.8f;
-        const float y = 6.5f + 3.0f * hashf(5, k), size = 0.6f + 0.5f * hashf(11, k);
-        for (int puff = 0; puff < 4; ++puff) {
-            const Vec2 p{x + (static_cast<float>(puff) - 1.5f) * size * 0.9f, y + (puff % 2 == 1 ? 0.25f : 0.0f) * size};
-            fill_disc(ren, to_screen(p), to_pixels(size * (puff % 3 == 1 ? 0.75f : 0.55f)), t.cloud);
-        }
+    // The sky in three bands, fixed to the window (it is far away), from deep overhead to the glow
+    // at the horizon.
+    const float w = static_cast<float>(kWidth), h = static_cast<float>(kHeight);
+    const float horizon = to_screen({0, kFloorTop}).y;
+    quad(ren, {0, 0}, {w, 0}, {w, horizon * 0.45f}, {0, horizon * 0.45f}, t.sky_top, t.sky_top, t.sky_mid, t.sky_mid);
+    quad(ren, {0, horizon * 0.45f}, {w, horizon * 0.45f}, {w, h}, {0, h}, t.sky_mid, t.sky_mid, t.sky_low, t.sky_low);
+    // Stars, faint, twinkling, only where the sky is dark enough.
+    for (unsigned k = 0; k < 90; ++k) {
+        const float x = hashf(71, k) * w, y = hashf(73, k) * horizon * 0.55f;
+        const float twinkle = 0.6f + 0.4f * std::sin(static_cast<float>(time) * (0.8f + hashf(79, k)) + hashf(83, k) * 6);
+        fill_disc(ren, {x, y}, 0.6f + 1.0f * hashf(89, k), with_alpha({255, 240, 225, 255}, 150 * twinkle * (1 - y / (horizon * 0.55f))));
     }
+    // The sun (or moon), far off: it barely moves with the camera. A wide bloom, then the disc.
+    const Vec2 sun = t.sun_at + Vec2{(view_centre().x - kWorldW * 0.5f) * 0.9f, 0};
+    const SDL_FPoint s = to_screen(sun);
+    glow(ren, s, to_pixels(t.sun_size * 9), with_alpha(t.sun, 90));
+    glow(ren, s, to_pixels(t.sun_size * 3), with_alpha(t.sun, 200));
+    fill_disc(ren, s, to_pixels(t.sun_size), t.sun);
 
+    // Hills in layers, each darker and less hazy than the one behind, with haze lying between them.
     if (t.castles) {
-        castle(ren, 3.5f, 2.2f, 3.0f, t.far_hill);
-        castle(ren, 12.5f, 3.0f, 3.8f, t.far_hill);
+        castle(ren, 3.0f, 2.2f, 3.4f, 0.25f, mix(t.sky_low, kInk, 0.55f));
+        castle(ren, 15.5f, 2.8f, 4.2f, 0.25f, mix(t.sky_low, kInk, 0.55f));
     }
-    hills(ren, 0.5f, 3.2f, 0.3f, 17, t.far_hill, mix(t.far_hill, t.sky_low, 0.4f));
-    hills(ren, 0.3f, 1.8f, 0.6f, 29, t.near_hill, darker(t.near_hill, 0.15f));
+    hills(ren, 2.4f, 3.0f, 0.2f, 3, mix(t.sky_low, kInk, 0.45f));
+    haze(ren, 4.2f, 1.0f, t.haze, 120);
+    hills(ren, 1.2f, 2.2f, 0.45f, 7, mix(t.sky_low, kInk, 0.68f));
+    haze(ren, 2.6f, 0.6f, t.haze, 90);
+    hills(ren, 0.4f, 1.3f, 0.75f, 11, mix(t.sky_low, kInk, 0.86f));
+    haze(ren, 1.4f, 0.3f, t.haze, 40);
 }
 
 void draw_ground(SDL_Renderer* ren, const Theme& t) {
     const SDL_FPoint a = to_screen({-4, kFloorTop}), b = to_screen({kWorldW + 4, -3});
-    fill_rect(ren, {a.x, a.y, b.x - a.x, b.y - a.y}, t.soil);
-    // A band of grass (or snow) on top, a little uneven.
-    constexpr int kSteps = 80;
-    for (int i = 0; i < kSteps; ++i) {
-        const float x0 = -4 + (kWorldW + 8) * static_cast<float>(i) / kSteps, x1 = -4 + (kWorldW + 8) * static_cast<float>(i + 1) / kSteps;
-        const float h0 = 0.12f + 0.05f * std::sin(x0 * 3.1f), h1 = 0.12f + 0.05f * std::sin(x1 * 3.1f);
-        quad(ren, to_screen({x0, kFloorTop + 0.02f}), to_screen({x1, kFloorTop + 0.02f}), to_screen({x1, kFloorTop - h1}),
-             to_screen({x0, kFloorTop - h0}), lighter(t.grass, 0.15f), lighter(t.grass, 0.15f), t.grass, t.grass);
+    fill_rect(ren, {a.x, a.y, b.x - a.x, b.y - a.y}, kInk);
+    // Blades of grass along the edge (on snowy nights, a pale rim of snow instead).
+    for (unsigned i = 0; i < 300; ++i) {
+        const float x = -4 + (kWorldW + 8) * static_cast<float>(i) / 300 + 0.03f * hashf(5, i);
+        const float h = t.snow ? 0.03f + 0.03f * hashf(7, i) : 0.06f + 0.16f * hashf(7, i);
+        thick_line(ren, to_screen({x, kFloorTop - 0.02f}), to_screen({x + 0.06f * (hashf(6, i) - 0.5f), kFloorTop + h}), std::max(1.5f, to_pixels(0.03f)), kInk);
     }
+    if (t.snow) thick_line(ren, to_screen({-4, kFloorTop}), to_screen({kWorldW + 4, kFloorTop}), std::max(2.0f, to_pixels(0.04f)), {200, 220, 240, 160});
 }
 
-void draw_shadow(SDL_Renderer* ren, const Body& b) {
-    const Vec2 off{0.07f, -0.07f};
-    const SDL_Color c{10, 14, 24, 60};
-    if (b.shape.type == phys::Shape::Type::Circle) {
-        fill_disc(ren, to_screen(b.pos + off), to_pixels(b.shape.circle.radius), c);
-        return;
-    }
-    Vec2 v[4], half;
-    corners(b, v, half);
-    SDL_FPoint pts[4];
-    for (int i = 0; i < 4; ++i) pts[i] = to_screen(v[i] + off);
-    fill_polygon(ren, pts, 4, c);
+void gradient_rect(SDL_Renderer* ren, SDL_FRect r, SDL_Color top, SDL_Color bottom) {
+    quad(ren, {r.x, r.y}, {r.x + r.w, r.y}, {r.x + r.w, r.y + r.h}, {r.x, r.y + r.h}, top, top, bottom, bottom);
 }
 
-void draw_block(SDL_Renderer* ren, const Body& b, Material m, float condition, unsigned seed) {
+void draw_vignette(SDL_Renderer* ren) {
+    // Four soft gradients from the edges inwards: black at the edge, gone a fifth of the way in.
+    const float w = static_cast<float>(kWidth), h = static_cast<float>(kHeight), mx = w * 0.18f, my = h * 0.22f;
+    const SDL_Color edge{0, 0, 0, 150}, none{0, 0, 0, 0};
+    quad(ren, {0, 0}, {mx, 0}, {mx, h}, {0, h}, edge, none, none, edge);
+    quad(ren, {w - mx, 0}, {w, 0}, {w, h}, {w - mx, h}, none, edge, edge, none);
+    quad(ren, {0, 0}, {w, 0}, {w, my}, {0, my}, edge, edge, none, none);
+    quad(ren, {0, h - my}, {w, h - my}, {w, h}, {0, h}, none, none, edge, edge);
+}
+
+void draw_block(SDL_Renderer* ren, const Body& b, Material m, float condition, unsigned seed, const Theme& t) {
+    const SDL_Color base = material_color(m);
     if (b.shape.type == phys::Shape::Type::Circle) {  // a boulder or a wrecking ball
-        const SDL_Color base = material_color(m);
-        fill_disc(ren, to_screen(b.pos), to_pixels(b.shape.circle.radius), darker(base, 0.15f));
-        fill_disc(ren, to_screen(b.pos + Vec2{-0.12f, 0.12f} * b.shape.circle.radius * 2.0f), to_pixels(b.shape.circle.radius * 0.6f),
-                  lighter(base, 0.12f));
+        fill_disc(ren, to_screen(b.pos), to_pixels(b.shape.circle.radius), m == Material::Ice ? base : kInk);
+        rim_disc(ren, b.pos, b.shape.circle.radius, t.sun_at, t.sun);
         return;
     }
     Vec2 v[4], half;
@@ -198,55 +250,48 @@ void draw_block(SDL_Renderer* ren, const Body& b, Material m, float condition, u
     for (int i = 0; i < 4; ++i) pts[i] = to_screen(v[i]);
     const Vec2 ux = b.q.x_axis(), uy{-ux.y, ux.x};
     const auto at = [&](float x, float y) { return to_screen(b.pos + ux * x + uy * y); };
-    SDL_Color base = material_color(m);
-    if (condition < 0.34f) base = darker(base, 0.25f);
-    fill_polygon(ren, pts, 4, base);
-
     const bool long_x = half.x >= half.y;
     const float lx = long_x ? half.x : half.y, sy = long_x ? half.y : half.x;
-    const auto along = [&](float s, float t) { return long_x ? at(s, t) : at(t, s); };
-    if (m == Material::Wood) {
-        // Grain: wavy lines along the long side, and a knot on bigger planks.
-        const SDL_Color grain = darker(base, 0.22f);
-        for (int line = 1; line <= 3; ++line) {
-            const float t = sy * (-1 + 0.5f * static_cast<float>(line)) + sy * 0.12f * (hashf(seed, static_cast<unsigned>(line)) - 0.5f);
-            SDL_FPoint prev = along(-lx * 0.92f, t);
-            for (int k = 1; k <= 6; ++k) {
-                const float s = -lx * 0.92f + lx * 1.84f * static_cast<float>(k) / 6.0f;
-                const SDL_FPoint p = along(s, t + sy * 0.06f * std::sin(s * 9.0f + static_cast<float>(line)));
-                thick_line(ren, prev, p, std::max(1.0f, to_pixels(0.018f)), grain);
-                prev = p;
-            }
-        }
-        if (lx > 0.45f) fill_disc(ren, along(lx * (hashf(seed, 9) - 0.5f), sy * 0.2f), to_pixels(sy * 0.22f), darker(base, 0.3f));
-    } else if (m == Material::Stone) {
-        // Speckle, and a bevelled inner edge.
-        for (unsigned k = 0; k < 7; ++k)
-            fill_disc(ren, at((hashf(seed, k) * 2 - 1) * half.x * 0.8f, (hashf(seed, k + 20) * 2 - 1) * half.y * 0.8f), to_pixels(0.025f + 0.02f * hashf(seed, k + 40)),
-                      k % 2 ? darker(base, 0.2f) : lighter(base, 0.15f));
-        const SDL_FPoint inner[4] = {at(-half.x * 0.82f, -half.y * 0.82f), at(half.x * 0.82f, -half.y * 0.82f), at(half.x * 0.82f, half.y * 0.82f),
-                                     at(-half.x * 0.82f, half.y * 0.82f)};
-        outline(ren, inner, 4, std::max(1.0f, to_pixels(0.02f)), lighter(base, 0.12f));
-    } else {
-        // Ice: two glints across it.
-        const SDL_Color glint{255, 255, 255, 170};
+    const auto along = [&](float s, float u) { return long_x ? at(s, u) : at(u, s); };
+
+    if (m == Material::Ice) {
+        // Ice: the one thing that lets light through. A dark glassy tint, cold glints, a bright rim.
+        fill_polygon(ren, pts, 4, {30, 54, 70, 200});
+        const SDL_Color glint{190, 235, 255, 150};
         thick_line(ren, along(-lx * 0.6f, -sy * 0.4f), along(-lx * 0.1f, sy * 0.5f), std::max(1.5f, to_pixels(0.03f)), glint);
         thick_line(ren, along(lx * 0.1f, -sy * 0.5f), along(lx * 0.35f, 0), std::max(1.0f, to_pixels(0.02f)), glint);
+        rim_box(ren, v, t.sun_at, {190, 235, 255, 255});
+    } else {
+        fill_polygon(ren, pts, 4, base);
+        if (m == Material::Wood) {  // grain, barely there: you see it when the light catches it
+            for (int line = 1; line <= 2; ++line) {
+                const float u = sy * (-1 + 0.66f * static_cast<float>(line));
+                thick_line(ren, along(-lx * 0.9f, u), along(lx * 0.9f, u + sy * 0.08f * (hashf(seed, static_cast<unsigned>(line)) - 0.5f)),
+                           std::max(1.0f, to_pixels(0.015f)), with_alpha(t.sun, 26));
+            }
+        } else {  // stone: a few chips catching the light
+            for (unsigned k = 0; k < 5; ++k)
+                fill_disc(ren, at((hashf(seed, k) * 2 - 1) * half.x * 0.8f, (hashf(seed, k + 20) * 2 - 1) * half.y * 0.8f), std::max(1.0f, to_pixels(0.022f)),
+                          with_alpha(t.sun, 40));
+        }
+        rim_box(ren, v, t.sun_at, t.sun, m == Material::Stone ? 0.8f : 1.0f);
     }
 
-    // Light from above: the edge facing most upward is lit, the one facing down in shade.
-    int top = 0, bottom = 0;
-    float best_up = -2, best_down = 2;
-    for (int i = 0; i < 4; ++i) {
-        const Vec2 e = v[(i + 1) % 4] - v[i];
-        const Vec2 n = Vec2{e.y, -e.x} * (1 / std::max(1e-6f, e.length()));  // outward, counter-clockwise polygon
-        if (n.y > best_up) best_up = n.y, top = i;
-        if (n.y < best_down) best_down = n.y, bottom = i;
+    // Damage: cracks that glow like embers, brighter the closer it is to breaking.
+    if (condition < 0.66f) {
+        const float heat = condition < 0.33f ? 1.0f : 0.55f;
+        const SDL_Color ember{255, 150, 70, static_cast<Uint8>(200 * heat)};
+        const float r = std::min(half.x, half.y) * 1.6f;
+        const auto c = [&](float x, float y) { return to_screen(b.pos + rotate(b.q, Vec2{x, y} * r)); };
+        const float lw = std::max(1.5f, to_pixels(0.025f));
+        thick_line(ren, c(-0.6f, 0.5f), c(-0.1f, 0.05f), lw, ember);
+        thick_line(ren, c(-0.1f, 0.05f), c(0.15f, 0.3f), lw, ember);
+        thick_line(ren, c(0.15f, 0.3f), c(0.6f, -0.2f), lw, ember);
+        if (condition < 0.33f) {
+            thick_line(ren, c(-0.4f, -0.6f), c(0.0f, -0.15f), lw, ember);
+            thick_line(ren, c(0.0f, -0.15f), c(0.45f, -0.5f), lw, ember);
+        }
     }
-    const float w = std::max(1.5f, to_pixels(0.04f));
-    outline(ren, pts, 4, std::max(1.5f, to_pixels(0.025f)), darker(base, 0.45f));
-    thick_line(ren, pts[top], pts[(top + 1) % 4], w, lighter(base, m == Material::Ice ? 0.6f : 0.35f));
-    thick_line(ren, pts[bottom], pts[(bottom + 1) % 4], w, darker(base, 0.35f));
 }
 
 void draw_rock(SDL_Renderer* ren, const Body& b, const Theme& t) {
@@ -254,174 +299,146 @@ void draw_rock(SDL_Renderer* ren, const Body& b, const Theme& t) {
     corners(b, v, half);
     SDL_FPoint pts[4];
     for (int i = 0; i < 4; ++i) pts[i] = to_screen(v[i]);
-    fill_polygon(ren, pts, 4, t.rock);
-    // A few darker blotches, fixed to the rock.
-    const auto at = [&](float x, float y) { return to_screen(b.pos + Vec2{x, y}); };
-    for (unsigned k = 0; k < 6; ++k)
-        fill_disc(ren, at((hashf(91, k) * 2 - 1) * half.x * 0.85f, (hashf(93, k) * 2 - 1) * half.y * 0.8f),
-                  to_pixels(std::min(half.x, half.y) * (0.15f + 0.2f * hashf(95, k))), darker(t.rock, 0.08f));
-    outline(ren, pts, 4, std::max(1.5f, to_pixels(0.03f)), t.rock_edge);
-    // The top face catches the light (statics never turn, so the top is the top).
-    thick_line(ren, at(-half.x, half.y), at(half.x, half.y), std::max(2.0f, to_pixels(0.06f)), lighter(t.rock, 0.3f));
+    fill_polygon(ren, pts, 4, kInk);
+    rim_box(ren, v, t.sun_at, t.sun, 0.7f);
 }
 
-void draw_pig(SDL_Renderer* ren, const Body& b, Pig kind, float condition, Vec2 look_at, double time, unsigned seed) {
+void draw_pig(SDL_Renderer* ren, const Body& b, Pig kind, float condition, Vec2 look_at, double time, unsigned seed, const Theme& t) {
     const Real r = b.shape.circle.radius;
-    const SDL_Color skin = condition < 0.34f ? SDL_Color{126, 168, 92, 255} : SDL_Color{126, 200, 98, 255};
-    const SDL_Color dark{70, 120, 56, 255};
-    // Ears first, so the head covers their roots. They stay on top whichever way the pig rolls.
+    // Two small ears, then the round body, all ink.
     for (const float side : {-1.0f, 1.0f}) {
         const Vec2 base = b.pos + Vec2{side * r * 0.55f, r * 0.7f};
-        const SDL_FPoint ear[3] = {to_screen(base + Vec2{-side * r * 0.25f, 0}), to_screen(base + Vec2{side * r * 0.25f, -r * 0.05f}),
-                                   to_screen(base + Vec2{side * r * 0.2f, r * 0.42f})};
-        fill_polygon(ren, ear, 3, darker(skin, 0.1f));
+        const SDL_FPoint ear[3] = {to_screen(base + Vec2{-side * r * 0.22f, 0}), to_screen(base + Vec2{side * r * 0.22f, -r * 0.05f}),
+                                   to_screen(base + Vec2{side * r * 0.16f, r * 0.36f})};
+        fill_polygon(ren, ear, 3, kInk);
     }
-    fill_disc(ren, to_screen(b.pos), to_pixels(r), dark);
-    fill_disc(ren, to_screen(b.pos), to_pixels(r * 0.93f), skin);
-    fill_disc(ren, to_screen(b.pos + Vec2{-r * 0.3f, r * 0.35f}), to_pixels(r * 0.3f), lighter(skin, 0.18f));  // a sheen
-
-    // The face looks the way the pig is looking: eyes shift towards `look_at`.
-    Vec2 gaze = look_at - b.pos;
-    gaze = gaze.length() > 1e-3f ? gaze * (1 / gaze.length()) : Vec2{-1, 0};
-    const bool blink = std::fmod(time + hashf(seed, 1) * 5.0, 4.3) < 0.13;
-    const bool hurt = condition < 0.6f;
-    for (const float side : {-1.0f, 1.0f}) {
-        const Vec2 eye = b.pos + Vec2{side * r * 0.36f, r * 0.2f};
-        if (blink || hurt) {  // a closed eye, or a squeezed one: two short strokes
-            const float tilt = hurt ? 0.12f * r : 0;
-            thick_line(ren, to_screen(eye + Vec2{-r * 0.16f, tilt * side}), to_screen(eye + Vec2{r * 0.16f, -tilt * side}), std::max(2.0f, to_pixels(r * 0.08f)),
-                       {30, 40, 30, 255});
-            continue;
-        }
-        fill_disc(ren, to_screen(eye), to_pixels(r * 0.2f), {250, 252, 246, 255});
-        fill_disc(ren, to_screen(eye + gaze * (r * 0.08f)), to_pixels(r * 0.095f), {24, 28, 24, 255});
-    }
-    // The snout, with nostrils.
-    const Vec2 snout = b.pos + Vec2{gaze.x * r * 0.06f, -r * 0.2f};
-    fill_ellipse(ren, snout, {1, 0}, r * 0.34f, r * 0.24f, lighter(skin, 0.12f));
-    for (const float side : {-1.0f, 1.0f}) fill_disc(ren, to_screen(snout + Vec2{side * r * 0.12f, 0}), to_pixels(r * 0.06f), dark);
-
-    if (kind == Pig::Helmet) {  // a steel cap over the top third
-        SDL_FPoint cap[18];
+    fill_disc(ren, to_screen(b.pos), to_pixels(r), kInk);
+    if (kind == Pig::Helmet) {  // a steel cap: the one hard edge on a pig, catching the light
+        SDL_FPoint cap[17];
         for (int i = 0; i < 17; ++i) {
             const float a = kPi * (0.1f + 0.8f * static_cast<float>(i) / 16.0f);
             cap[i] = to_screen(b.pos + Vec2{std::cos(a), std::sin(a) + 0.12f} * (r * 1.08f));
         }
-        fill_polygon(ren, cap, 17, {150, 156, 170, 255});
-        cap[17] = cap[0];
-        for (int i = 0; i < 17; ++i) thick_line(ren, cap[i], cap[i + 1], std::max(1.5f, to_pixels(0.03f)), {206, 212, 224, 255});
+        fill_polygon(ren, cap, 17, {28, 30, 38, 255});
+        for (int i = 0; i < 16; ++i) thick_line(ren, cap[i], cap[i + 1], std::max(1.5f, to_pixels(0.03f)), with_alpha(t.sun, 140));
     }
-    if (kind == Pig::Big) {  // a moustache, for the boss
-        for (const float side : {-1.0f, 1.0f})
-            thick_line(ren, to_screen(snout + Vec2{0, -r * 0.24f}), to_screen(snout + Vec2{side * r * 0.5f, -r * 0.16f}), std::max(3.0f, to_pixels(r * 0.12f)),
-                       {84, 60, 40, 255});
+    rim_disc(ren, b.pos, r, t.sun_at, t.sun);
+
+    // The eyes: two points of light, looking at the bird. Hurt, they burn orange and one narrows.
+    Vec2 gaze = look_at - b.pos;
+    gaze = gaze.length() > 1e-3f ? gaze * (1 / gaze.length()) : Vec2{-1, 0};
+    const bool blink = std::fmod(time + hashf(seed, 1) * 5.0, 4.3) < 0.12;
+    if (blink) return;
+    const bool hurt = condition < 0.6f;
+    const SDL_Color eye = hurt ? SDL_Color{255, 150, 60, 255} : t.eyes;
+    const float size = kind == Pig::Big ? 0.11f : 0.09f;
+    for (const float side : {-1.0f, 1.0f}) {
+        const Vec2 e = b.pos + Vec2{side * r * 0.32f, r * 0.15f} + gaze * (r * 0.08f);
+        const float s = hurt && side > 0 ? 0.6f : 1.0f;
+        glow(ren, to_screen(e), to_pixels(r * 0.4f), with_alpha(eye, 120));
+        fill_ellipse(ren, e, {1, 0}, r * size * 1.3f, r * size * s, mix(eye, {255, 255, 255, 255}, 0.4f));
     }
 }
 
-void draw_bird(SDL_Renderer* ren, Vec2 pos, Real radius, Vec2 heading, Real stretch, Real squash, Ammo kind, bool egg) {
-    if (egg) {  // an egg: pale, a little pointed upwards, speckled
-        fill_ellipse(ren, pos, {0, 1}, radius * 1.15f, radius * 0.9f, {250, 244, 222, 255});
-        fill_disc(ren, to_screen(pos + Vec2{radius * 0.3f, radius * 0.2f}), to_pixels(radius * 0.12f), {214, 200, 160, 255});
+void draw_bird(SDL_Renderer* ren, Vec2 pos, Real radius, Vec2 heading, Real stretch, Real squash, Ammo kind, bool egg, const Theme& t) {
+    if (egg) {
+        fill_ellipse(ren, pos, {0, 1}, radius * 1.15f, radius * 0.9f, kInk);
+        rim_disc(ren, pos, radius, t.sun_at, t.sun);
+        glow(ren, to_screen(pos), to_pixels(radius * 1.6f), with_alpha({255, 140, 80, 255}, 90));  // it is about to go off
         return;
-    }
-    SDL_Color body;
-    switch (kind) {
-        case Ammo::Ball: body = {64, 152, 232, 255}; break;
-        case Ammo::Heavy: body = {40, 84, 150, 255}; break;
-        case Ammo::Blast: body = {222, 66, 84, 255}; break;
-        case Ammo::Split: body = {56, 192, 196, 255}; break;
-        case Ammo::Dart: body = {238, 196, 56, 255}; break;
-        case Ammo::Dropper: body = {236, 236, 244, 255}; break;
     }
     const Vec2 along = heading, across{-heading.y, heading.x};
     const Real a = radius * stretch * (1 - 0.35f * squash), b = radius / stretch * (1 + 0.25f * squash);
-    // Which way is up for the face: the side of the heading nearer the sky.
-    const Vec2 up = across.y >= 0 ? across : across * -1.0f;
+    const Vec2 up = across.y >= 0 ? across : across * -1.0f;  // the side of the heading nearer the sky
     const auto at = [&](float x, float y) { return pos + along * (x * a) + up * (y * b); };
+    const SDL_Color streak = bird_color(kind);
 
-    // Tail feathers behind, then the body.
-    for (int k = -1; k <= 1; ++k)
-        thick_line(ren, to_screen(at(-0.8f, 0.05f * static_cast<float>(k))), to_screen(at(-1.35f, 0.3f * static_cast<float>(k) + 0.1f)),
-                   std::max(2.0f, to_pixels(radius * 0.16f)), darker(body, 0.3f));
-    fill_ellipse(ren, pos, along, a, b, darker(body, 0.35f));
-    fill_ellipse(ren, pos, along, a * 0.92f, b * 0.92f, body);
-    fill_ellipse(ren, at(-0.05f, -0.35f), along, a * 0.5f, b * 0.38f, lighter(body, 0.35f));  // a pale belly
-    // A wing folded along the side, so the shape says "bird" before the face does.
-    {
-        const SDL_FPoint wing[4] = {to_screen(at(-0.55f, 0.05f)), to_screen(at(0.05f, 0.18f)), to_screen(at(-0.05f, -0.22f)),
-                                    to_screen(at(-0.75f, -0.32f))};
-        fill_polygon(ren, wing, 4, darker(body, 0.22f));
-    }
-
-    if (kind == Ammo::Blast) {  // a fuse with a spark
-        thick_line(ren, to_screen(at(0, 0.9f)), to_screen(at(0.15f, 1.35f)), std::max(2.0f, to_pixels(0.04f)), {60, 50, 40, 255});
-        fill_disc(ren, to_screen(at(0.15f, 1.4f)), to_pixels(0.07f), {255, 210, 90, 255});
-    }
+    // A swept tail, the body, a beak: all ink.
+    const SDL_FPoint tail[3] = {to_screen(at(-0.7f, 0.35f)), to_screen(at(-1.6f, 0.15f)), to_screen(at(-0.7f, -0.3f))};
+    fill_polygon(ren, tail, 3, kInk);
+    fill_ellipse(ren, pos, along, a, b, kInk);
+    const SDL_FPoint beak[3] = {to_screen(at(0.75f, 0.2f)), to_screen(at(1.45f, -0.05f)), to_screen(at(0.75f, -0.3f))};
+    fill_polygon(ren, beak, 3, kInk);
     if (kind == Ammo::Dart) {  // a swept crest
-        const SDL_FPoint crest[3] = {to_screen(at(-0.1f, 0.8f)), to_screen(at(0.4f, 0.85f)), to_screen(at(-0.6f, 1.4f))};
-        fill_polygon(ren, crest, 3, darker(body, 0.15f));
+        const SDL_FPoint crest[3] = {to_screen(at(-0.1f, 0.8f)), to_screen(at(0.4f, 0.85f)), to_screen(at(-0.7f, 1.45f))};
+        fill_polygon(ren, crest, 3, kInk);
     }
-    if (kind == Ammo::Dropper) {  // a tuft
-        for (int k = 0; k < 3; ++k)
-            thick_line(ren, to_screen(at(0.0f, 0.85f)), to_screen(at(-0.25f + 0.25f * static_cast<float>(k), 1.3f)), std::max(1.5f, to_pixels(0.03f)), {180, 180, 196, 255});
+    if (kind == Ammo::Heavy) {  // a heavy brow ridge
+        thick_line(ren, to_screen(at(0.05f, 0.7f)), to_screen(at(0.7f, 0.5f)), std::max(3.0f, to_pixels(radius * 0.22f)), kInk);
     }
+    rim_disc(ren, pos, std::max(a, b), t.sun_at, t.sun);
 
-    // The eye, looking ahead, under a stern brow (bushier on the heavy bird); then the beak.
-    const Vec2 eye = at(0.36f, 0.3f);
-    fill_disc(ren, to_screen(eye), std::max(2.5f, to_pixels(radius * 0.32f)), {252, 252, 248, 255});
-    fill_disc(ren, to_screen(eye + along * (radius * 0.11f)), std::max(1.5f, to_pixels(radius * 0.15f)), {20, 24, 30, 255});
-    const float brow = kind == Ammo::Heavy ? radius * 0.2f : radius * 0.11f;
-    thick_line(ren, to_screen(at(0.12f, 0.62f)), to_screen(at(0.66f, 0.46f)), std::max(2.0f, to_pixels(brow)), {40, 30, 30, 255});
-    const SDL_FPoint beak[3] = {to_screen(at(0.74f, 0.16f)), to_screen(at(1.45f, -0.06f)), to_screen(at(0.74f, -0.32f))};
-    fill_polygon(ren, beak, 3, {250, 184, 60, 255});
+    // Its kind's colour, as a streak along the back: the one bright thing about it.
+    thick_line(ren, to_screen(at(-0.75f, 0.45f)), to_screen(at(0.35f, 0.62f)), std::max(2.0f, to_pixels(radius * 0.13f)), with_alpha(streak, 220));
+    if (kind == Ammo::Blast) {  // a fuse, burning
+        thick_line(ren, to_screen(at(0, 0.9f)), to_screen(at(0.15f, 1.35f)), std::max(2.0f, to_pixels(0.04f)), kInk);
+        glow(ren, to_screen(at(0.15f, 1.4f)), to_pixels(0.25f), {255, 170, 80, 220});
+        fill_disc(ren, to_screen(at(0.15f, 1.4f)), std::max(2.0f, to_pixels(0.04f)), {255, 236, 190, 255});
+    }
+    // One eye, bright.
+    const SDL_FPoint eye = to_screen(at(0.42f, 0.25f));
+    glow(ren, eye, to_pixels(radius * 0.45f), {255, 255, 255, 110});
+    fill_disc(ren, eye, std::max(1.8f, to_pixels(radius * 0.11f)), {255, 255, 250, 255});
 }
 
-void draw_sling(SDL_Renderer* ren, Vec2 pouch, std::optional<Vec2> bird, Real bird_radius, Vec2 wobble) {
-    const SDL_Color wood{120, 80, 46, 255}, wood_light{160, 112, 66, 255}, rubber{70, 40, 34, 255};
+void draw_sling(SDL_Renderer* ren, Vec2 pouch, std::optional<Vec2> bird, Real bird_radius, Vec2 wobble, const Theme& t) {
+    const SDL_Color rubber{30, 20, 18, 255};
     const Vec2 fork = pouch + Vec2{0, -0.5f}, back = pouch + Vec2{-0.24f, 0.16f}, front = pouch + Vec2{0.24f, 0.16f};
-    const float w = std::max(4.0f, to_pixels(0.11f)), band = std::max(3.0f, to_pixels(0.06f));
-    // The back band and the back prong go behind the bird; the front ones in front of it.
+    const float w = std::max(4.0f, to_pixels(0.11f)), band = std::max(2.5f, to_pixels(0.05f));
     const Vec2 meet = bird ? *bird : pouch + Vec2{0, 0.1f} + wobble;
-    thick_line(ren, to_screen(fork), to_screen(back), w, darker(wood, 0.15f));
+    thick_line(ren, to_screen(fork), to_screen(back), w, kInk);
     thick_line(ren, to_screen(back), to_screen(meet), band, rubber);
-    if (bird) fill_ellipse(ren, *bird + Vec2{-bird_radius * 0.75f, 0}, {1, 0}, bird_radius * 0.3f, bird_radius * 0.75f, {92, 60, 40, 255});  // the pouch
-    thick_line(ren, to_screen({pouch.x, kFloorTop}), to_screen(fork), w * 1.2f, wood);
-    thick_line(ren, to_screen({pouch.x - 0.03f, kFloorTop}), to_screen(fork + Vec2{-0.03f, 0}), w * 0.3f, wood_light);
-    thick_line(ren, to_screen(fork), to_screen(front), w, wood);
+    if (bird) fill_ellipse(ren, *bird + Vec2{-bird_radius * 0.75f, 0}, {1, 0}, bird_radius * 0.3f, bird_radius * 0.75f, rubber);  // the pouch
+    thick_line(ren, to_screen({pouch.x, kFloorTop}), to_screen(fork), w * 1.2f, kInk);
+    thick_line(ren, to_screen(fork), to_screen(front), w, kInk);
+    // A thin line of light down the sunward side of the post.
+    thick_line(ren, to_screen({pouch.x + 0.05f, kFloorTop}), to_screen(fork + Vec2{0.05f, 0}), std::max(1.0f, to_pixels(0.02f)), with_alpha(t.sun, 120));
 }
 
 void draw_sling_front(SDL_Renderer* ren, Vec2 pouch, std::optional<Vec2> bird, Vec2 wobble) {
     const Vec2 front = pouch + Vec2{0.24f, 0.16f};
     // The front band holds the pouch behind the bird: it ends at the bird's back, not across its face.
     const Vec2 meet = bird ? *bird + Vec2{-0.2f, 0} : pouch + Vec2{0, 0.1f} + wobble;
-    thick_line(ren, to_screen(front), to_screen(meet), std::max(3.0f, to_pixels(0.06f)), {90, 52, 42, 255});
+    thick_line(ren, to_screen(front), to_screen(meet), std::max(2.5f, to_pixels(0.05f)), {30, 20, 18, 255});
 }
 
 void Weather::update(const Theme& t, float dt) {
     time_ += dt;
-    if (!t.snow) {
-        flakes_.clear();
-        return;
+    const int kind = t.snow ? 1 : t.embers ? 2 : 0;
+    if (kind != kind_) {
+        motes_.clear();
+        kind_ = kind;
     }
-    // Screen-space flakes: they fall past whatever the camera is doing.
-    while (flakes_.size() < 90) {
-        const unsigned k = static_cast<unsigned>(flakes_.size()) + static_cast<unsigned>(time_ * 1000);
-        const bool first = time_ < 0.5f;  // the first fill covers the whole view, later ones start above it
-        flakes_.push_back({hashf(41, k) * static_cast<float>(kWidth), (first ? 1 : -1) * hashf(43, k) * static_cast<float>(kHeight), 25 + 35 * hashf(47, k),
-                           1.5f + 2.0f * hashf(53, k), hashf(59, k) * 6.28f});
+    const size_t want = kind == 1 ? 110 : kind == 2 ? 70 : 60;
+    while (motes_.size() < want) {  // screen-space: they drift past whatever the camera is doing
+        const unsigned k = static_cast<unsigned>(motes_.size()) + static_cast<unsigned>(time_ * 1000);
+        const bool first = time_ < 0.5f;  // the first fill covers the whole view, later ones start off it
+        const float y = first ? hashf(43, k) * static_cast<float>(kHeight) : kind == 2 ? static_cast<float>(kHeight) + 10 : -10;
+        motes_.push_back({hashf(41, k) * static_cast<float>(kWidth), y, kind == 1 ? 25 + 35 * hashf(47, k) : 8 + 18 * hashf(47, k),
+                          kind == 1 ? 1.5f + 2.0f * hashf(53, k) : 0.8f + 1.4f * hashf(53, k), hashf(59, k) * 6.28f});
     }
-    for (Flake& f : flakes_) {
-        f.y += f.speed * dt;
-        f.x += std::sin(time_ * 0.8f + f.sway) * 12.0f * dt;
-        if (f.y > static_cast<float>(kHeight)) {
-            f.y -= static_cast<float>(kHeight) + 10;
-            f.x = std::fmod(f.x + 377.0f, static_cast<float>(kWidth));
+    for (Mote& m : motes_) {
+        m.y += (kind == 2 ? -m.speed : kind == 1 ? m.speed : m.speed * 0.15f) * dt;  // sparks rise, snow falls, dust hangs
+        m.x += std::sin(time_ * 0.7f + m.sway) * (kind == 0 ? 6.0f : 12.0f) * dt;
+        if (m.y > static_cast<float>(kHeight) + 12 || m.y < -12) {
+            m.y = kind == 2 ? static_cast<float>(kHeight) + 10 : -10;
+            m.x = std::fmod(m.x + 377.0f, static_cast<float>(kWidth));
         }
     }
 }
 
-void Weather::draw(SDL_Renderer* ren) const {
-    for (const Flake& f : flakes_) fill_disc(ren, {f.x, f.y}, f.size, {255, 255, 255, 200});
+void Weather::draw(SDL_Renderer* ren, const Theme& t) const {
+    for (const Mote& m : motes_) {
+        if (kind_ == 1) {
+            fill_disc(ren, {m.x, m.y}, m.size, {235, 242, 255, 200});
+        } else if (kind_ == 2) {
+            const float flicker = 0.5f + 0.5f * std::sin(time_ * 6 + m.sway * 3);
+            glow(ren, {m.x, m.y}, m.size * 5, with_alpha({255, 150, 70, 255}, 90 * flicker));
+            fill_disc(ren, {m.x, m.y}, m.size, {255, 210, 150, static_cast<Uint8>(150 + 100 * flicker)});
+        } else {
+            fill_disc(ren, {m.x, m.y}, m.size, with_alpha(t.sun, 50 + 60 * (0.5f + 0.5f * std::sin(time_ + m.sway))));
+        }
+    }
 }
 
 }  // namespace kid::app
