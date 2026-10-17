@@ -346,6 +346,12 @@ void draw_bird(SDL_Renderer* ren, Vec2 pos, Real radius, Vec2 heading, Real stre
     fill_ellipse(ren, pos, along, a, b, darker(body, 0.35f));
     fill_ellipse(ren, pos, along, a * 0.92f, b * 0.92f, body);
     fill_ellipse(ren, at(-0.05f, -0.35f), along, a * 0.5f, b * 0.38f, lighter(body, 0.35f));  // a pale belly
+    // A wing folded along the side, so the shape says "bird" before the face does.
+    {
+        const SDL_FPoint wing[4] = {to_screen(at(-0.55f, 0.05f)), to_screen(at(0.05f, 0.18f)), to_screen(at(-0.05f, -0.22f)),
+                                    to_screen(at(-0.75f, -0.32f))};
+        fill_polygon(ren, wing, 4, darker(body, 0.22f));
+    }
 
     if (kind == Ammo::Blast) {  // a fuse with a spark
         thick_line(ren, to_screen(at(0, 0.9f)), to_screen(at(0.15f, 1.35f)), std::max(2.0f, to_pixels(0.04f)), {60, 50, 40, 255});
@@ -361,12 +367,12 @@ void draw_bird(SDL_Renderer* ren, Vec2 pos, Real radius, Vec2 heading, Real stre
     }
 
     // The eye, looking ahead, under a stern brow (bushier on the heavy bird); then the beak.
-    const Vec2 eye = at(0.38f, 0.28f);
-    fill_disc(ren, to_screen(eye), to_pixels(radius * 0.26f), {252, 252, 248, 255});
-    fill_disc(ren, to_screen(eye + along * (radius * 0.09f)), to_pixels(radius * 0.12f), {20, 24, 30, 255});
+    const Vec2 eye = at(0.36f, 0.3f);
+    fill_disc(ren, to_screen(eye), std::max(2.5f, to_pixels(radius * 0.32f)), {252, 252, 248, 255});
+    fill_disc(ren, to_screen(eye + along * (radius * 0.11f)), std::max(1.5f, to_pixels(radius * 0.15f)), {20, 24, 30, 255});
     const float brow = kind == Ammo::Heavy ? radius * 0.2f : radius * 0.11f;
     thick_line(ren, to_screen(at(0.12f, 0.62f)), to_screen(at(0.66f, 0.46f)), std::max(2.0f, to_pixels(brow)), {40, 30, 30, 255});
-    const SDL_FPoint beak[3] = {to_screen(at(0.78f, 0.12f)), to_screen(at(1.3f, -0.05f)), to_screen(at(0.78f, -0.28f))};
+    const SDL_FPoint beak[3] = {to_screen(at(0.74f, 0.16f)), to_screen(at(1.45f, -0.06f)), to_screen(at(0.74f, -0.32f))};
     fill_polygon(ren, beak, 3, {250, 184, 60, 255});
 }
 
@@ -378,7 +384,7 @@ void draw_sling(SDL_Renderer* ren, Vec2 pouch, std::optional<Vec2> bird, Real bi
     const Vec2 meet = bird ? *bird : pouch + Vec2{0, 0.1f} + wobble;
     thick_line(ren, to_screen(fork), to_screen(back), w, darker(wood, 0.15f));
     thick_line(ren, to_screen(back), to_screen(meet), band, rubber);
-    if (bird) fill_ellipse(ren, *bird + Vec2{-bird_radius * 0.3f, 0}, {1, 0}, bird_radius * 0.55f, bird_radius * 0.9f, {92, 60, 40, 255});  // the pouch
+    if (bird) fill_ellipse(ren, *bird + Vec2{-bird_radius * 0.75f, 0}, {1, 0}, bird_radius * 0.3f, bird_radius * 0.75f, {92, 60, 40, 255});  // the pouch
     thick_line(ren, to_screen({pouch.x, kFloorTop}), to_screen(fork), w * 1.2f, wood);
     thick_line(ren, to_screen({pouch.x - 0.03f, kFloorTop}), to_screen(fork + Vec2{-0.03f, 0}), w * 0.3f, wood_light);
     thick_line(ren, to_screen(fork), to_screen(front), w, wood);
@@ -386,7 +392,8 @@ void draw_sling(SDL_Renderer* ren, Vec2 pouch, std::optional<Vec2> bird, Real bi
 
 void draw_sling_front(SDL_Renderer* ren, Vec2 pouch, std::optional<Vec2> bird, Vec2 wobble) {
     const Vec2 front = pouch + Vec2{0.24f, 0.16f};
-    const Vec2 meet = bird ? *bird : pouch + Vec2{0, 0.1f} + wobble;
+    // The front band holds the pouch behind the bird: it ends at the bird's back, not across its face.
+    const Vec2 meet = bird ? *bird + Vec2{-0.2f, 0} : pouch + Vec2{0, 0.1f} + wobble;
     thick_line(ren, to_screen(front), to_screen(meet), std::max(3.0f, to_pixels(0.06f)), {90, 52, 42, 255});
 }
 

@@ -5,6 +5,7 @@
 
 #include <algorithm>
 #include <cmath>
+#include <vector>
 #include <optional>
 
 namespace kid::app {
@@ -132,6 +133,22 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
             fill_disc(ren, a, std::max(2.0f, to_pixels(0.05f)), {180, 184, 196, 255});
         }
 
+    // The birds still to come, waiting their turn on the ground behind the sling, hopping now and then.
+    {
+        const std::vector<Ammo>& ammo = level.layout().ammo;
+        int place = 0;
+        Real x = level.layout().pouch.x - 0.3f;  // the right edge of the line
+        for (size_t k = static_cast<size_t>(level.shots_used()) + 1; k < ammo.size(); ++k, ++place) {
+            const Real r = ammo_props(ammo[k]).radius * 0.85f;  // a touch smaller: five have to fit beside the wall
+            x -= r + 0.04f;
+            const float phase = static_cast<float>(level.sim_time) * 2.3f + static_cast<float>(place) * 1.9f;
+            const float hop = 0.25f * std::pow(std::max(0.0f, std::sin(phase)), 12.0f);
+            const Vec2 at{x, kFloorTop + r + hop};
+            x -= r + 0.04f;
+            draw_bird(ren, at, r, {1, 0}, 1, 0, ammo[k], false);
+        }
+    }
+
     // The sling, with the next bird in it.
     const Vec2 pouch = level.layout().pouch;
     std::optional<Vec2> held;
@@ -143,12 +160,15 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
         held_radius = ammo_props(*next).radius;
     }
     draw_sling(ren, pouch, held, held_radius, wobble);
+    if (!pull && held) draw_sling_front(ren, pouch, held, wobble);
     if (next) {
         const Vec2 p = pull ? level.pull_to(pouch + *pull) : Vec2{};
         const Vec2 aim = p.length() > 1e-3f ? p * (-1 / p.length()) : Vec2{1, 0};
         draw_bird(ren, *held, held_radius, aim, 1, 0, *next, false);
     }
-    draw_sling_front(ren, pouch, held, wobble);
+    // The front band crosses in front of the bird only while it is pulled; at rest it stays behind,
+    // out of the bird's face.
+    if (pull || !held) draw_sling_front(ren, pouch, held, wobble);
 
     for (const Overlay::Line& l : marks.lines) {
         const SDL_Color c = role_colors(l.role).edge;
@@ -193,15 +213,14 @@ void draw_level(SDL_Renderer* ren, const Level& level, std::optional<Vec2> pull,
 }
 
 void draw_ammo_icon(SDL_Renderer* ren, SDL_FPoint centre, Ammo a, bool spent) {
-    const Role r = role_of(a);
-    const RoleColors c = role_colors(r);
     const float radius = ammo_props(a).radius * kPixelsPerMeter * 0.8f;
     if (spent) {
-        fill_disc(ren, centre, radius, {50, 56, 72, 255});
+        fill_disc(ren, centre, radius * 0.6f, {50, 56, 72, 200});
         return;
     }
-    fill_disc(ren, centre, radius + 2.0f, c.edge);
-    fill_disc(ren, centre, radius, c.fill);
+    // The same bird as in the world, drawn at this spot on the screen: map the spot back into the
+    // world at the current view, so draw_bird can do the rest.
+    draw_bird(ren, to_world(centre.x, centre.y), radius / view_scale(), {1, 0}, 1, 0, a, false);
 }
 
 }  // namespace kid::app

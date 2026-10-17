@@ -364,8 +364,9 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
 
     // The footer: what to do now on the left, the counters on the right. It has its own strip, since
     // the floor under it moves when the camera does.
-    fill_rect(ren, {0, kFooterTop, width, static_cast<float>(kHeight) - kFooterTop}, {18, 21, 30, 150});  // the grass shows through
+    // No strip behind it: the ground and the birds waiting on it stay in view. A shadow keeps it readable.
     const std::string hint = level.hint();
+    text(ren, 50.0f, kFooterTop + 10.0f, 2.0f, {10, 12, 18, 220}, "%s", hint.c_str());
     text(ren, 48.0f, kFooterTop + 8.0f, 2.0f, color::kText, "%s", hint.c_str());
     // The counters on the right, as many as fit beside the hint: the time goes first, then the best score.
     const Best best = app.progress.best(level.name());
@@ -379,7 +380,8 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
         if (detail >= 2) SDL_snprintf(counters + n, sizeof(counters) - static_cast<size_t>(n), "   %5.1f s", level.sim_time);
         if (text_width(counters, 2.0f) <= room) break;
     }
-    text(ren, width - 48.0f - text_width(counters, 2.0f), kFooterTop + 8.0f, 2.0f, color::kDim, "%s", counters);
+    text(ren, width - 46.0f - text_width(counters, 2.0f), kFooterTop + 10.0f, 2.0f, {10, 12, 18, 220}, "%s", counters);
+    text(ren, width - 48.0f - text_width(counters, 2.0f), kFooterTop + 8.0f, 2.0f, color::kText, "%s", counters);
 
     if (app.show_help) {
         const std::vector<std::string> lines = level.help();
