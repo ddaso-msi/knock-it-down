@@ -404,8 +404,11 @@ void draw_hud(SDL_Renderer* ren, const App& app) {
             y += 30.0f;
         }
         y += 20.0f;
-        for (const char* l : keys) {
-            text(ren, r.x + 40.0f, y, 2.0f, color::kDim, "%s", l);
+        for (const char* l : keys) {  // two columns: the key, then what it does (split at the first space)
+            const std::string line = l;
+            const size_t gap = line.find(' '), start = line.find_first_not_of(' ', gap);
+            text(ren, r.x + 40.0f, y, 2.0f, color::kText, "%s", line.substr(0, gap).c_str());
+            text(ren, r.x + 130.0f, y, 2.0f, color::kDim, "%s", start == std::string::npos ? "" : line.substr(start).c_str());
             y += 30.0f;
         }
     } else if (level.status == Status::Won && app.slow <= 0) {
@@ -535,6 +538,9 @@ int main(int argc, char** argv) {
     }
     SDL_SetRenderDrawBlendMode(renderer, SDL_BLENDMODE_BLEND);
     set_pixel_density(renderer, SDL_GetWindowPixelDensity(window));  // crisp on a Retina screen
+    // A rounded face from the system if there is one (nothing is shipped with the game).
+    load_font({"/System/Library/Fonts/Supplemental/Arial Rounded Bold.ttf", "/System/Library/Fonts/Supplemental/Verdana Bold.ttf",
+               "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", "C:/Windows/Fonts/arialbd.ttf"});
 
     App app;
     int result = 0;
@@ -554,11 +560,13 @@ int main(int argc, char** argv) {
             last = now;
             draw(renderer, app);
             SDL_RenderPresent(renderer);
+            end_text_frame();
             app.audio.pump();
         }
     }
 
     app.level.reset();
+    close_font();
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
     SDL_Quit();

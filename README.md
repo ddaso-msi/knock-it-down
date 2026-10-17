@@ -94,7 +94,9 @@ pig on a plank tilted by a tenth of a degree rolls off in time.
 
 ## Build and play
 
-Needs CMake 3.25+, Ninja, a C++20 compiler, and SDL3 for the game window (`brew install sdl3`). The
+Needs CMake 3.25+, Ninja, a C++20 compiler, and SDL3 for the game window (`brew install sdl3`).
+SDL3_ttf (`brew install sdl3_ttf`) is optional. With it, text is drawn in a rounded face loaded
+from the system's own fonts at run time (no font is shipped); without it, in SDL's pixel font. The
 engine is a git submodule:
 
 ```bash

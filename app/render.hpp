@@ -3,6 +3,8 @@
 #include <SDL3/SDL.h>
 #include <phys/world.hpp>
 
+#include <initializer_list>
+
 namespace kid::app {
 
 constexpr int kWidth = 1280, kHeight = 720;
@@ -51,6 +53,12 @@ void text(SDL_Renderer* ren, float x, float y, float scale, SDL_Color c, SDL_PRI
     SDL_PRINTF_VARARG_FUNC(6);
 void text_centered(SDL_Renderer* ren, float cx, float y, float scale, SDL_Color c, const char* str);
 float text_width(const char* str, float scale);
+// Switches text to the first of these font files that opens (when built with SDL3_ttf). Returns
+// whether one did; otherwise text stays in SDL's built-in pixel font. close_font() before the renderer goes.
+bool load_font(std::initializer_list<const char*> paths);
+void close_font();
+// Lets go of text images not drawn for a couple of seconds. Call once a frame.
+void end_text_frame();
 
 struct Button {
     SDL_FRect rect;

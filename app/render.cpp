@@ -1,5 +1,13 @@
 #include "render.hpp"
 
+#ifdef KID_TTF
+#include <SDL3_ttf/SDL_ttf.h>
+
+#include <map>
+#include <optional>
+#include <string>
+#endif
+
 #include <cmath>
 #include <cstdarg>
 #include <cstdio>
@@ -137,12 +145,104 @@ void dashed_line(SDL_Renderer* ren, Vec2 from, Vec2 to, SDL_Color c) {
     }
 }
 
+#ifdef KID_TTF
+namespace {
+
+// A real typeface. Each piece of text is rendered once into a texture at the screen's full pixel
+// density and kept while it keeps being drawn: most text (labels, counters) repeats frame after frame.
+struct Font {
+    std::string path;
+    std::map<int, TTF_Font*> sizes;  // by pixel size
+};
+std::optional<Font> g_font;
+struct Cached {
+    SDL_Texture* texture;
+    float w, h;  // in window coordinates
+    Uint64 used;
+};
+std::map<std::string, Cached> g_text_cache;
+Uint64 g_text_frame = 0;
+
+// The debug font's glyphs are 8 pixels a scale step; this face, a little larger, reads the same size.
+int pixel_size(float scale) { return std::max(6, static_cast<int>(std::lround(9.5f * scale * g_density))); }
+
+TTF_Font* font_for(float scale) {
+    const int px = pixel_size(scale);
+    auto it = g_font->sizes.find(px);
+    if (it != g_font->sizes.end()) return it->second;
+    TTF_Font* f = TTF_OpenFont(g_font->path.c_str(), static_cast<float>(px));
+    return g_font->sizes[px] = f;
+}
+
+}  // namespace
+
+bool load_font(std::initializer_list<const char*> paths) {
+    if (!TTF_Init()) return false;
+    for (const char* p : paths) {
+        TTF_Font* f = TTF_OpenFont(p, 16);
+        if (!f) continue;
+        TTF_CloseFont(f);
+        g_font = Font{p, {}};
+        return true;
+    }
+    return false;
+}
+
+void close_font() {
+    for (auto& [key, c] : g_text_cache) SDL_DestroyTexture(c.texture);
+    g_text_cache.clear();
+    if (g_font)
+        for (auto& [px, f] : g_font->sizes)
+            if (f) TTF_CloseFont(f);
+    g_font.reset();
+    TTF_Quit();
+}
+
+void end_text_frame() {
+    ++g_text_frame;
+    for (auto it = g_text_cache.begin(); it != g_text_cache.end();)
+        if (g_text_frame - it->second.used > 120) {
+            SDL_DestroyTexture(it->second.texture);
+            it = g_text_cache.erase(it);
+        } else {
+            ++it;
+        }
+}
+#else
+bool load_font(std::initializer_list<const char*>) { return false; }
+void close_font() {}
+void end_text_frame() {}
+#endif
+
 void text(SDL_Renderer* ren, float x, float y, float scale, SDL_Color c, const char* fmt, ...) {
     char buf[256];
     va_list args;
     va_start(args, fmt);
     std::vsnprintf(buf, sizeof(buf), fmt, args);
     va_end(args);
+#ifdef KID_TTF
+    if (g_font && buf[0]) {
+        if (TTF_Font* f = font_for(scale)) {
+            char key[300];
+            std::snprintf(key, sizeof(key), "%d|%d,%d,%d|%s", pixel_size(scale), c.r, c.g, c.b, buf);
+            auto it = g_text_cache.find(key);
+            if (it == g_text_cache.end()) {
+                SDL_Surface* surf = TTF_RenderText_Blended(f, buf, 0, {c.r, c.g, c.b, 255});
+                SDL_Texture* tex = surf ? SDL_CreateTextureFromSurface(ren, surf) : nullptr;
+                if (tex) it = g_text_cache.emplace(key, Cached{tex, static_cast<float>(surf->w) / g_density, static_cast<float>(surf->h) / g_density, 0}).first;
+                SDL_DestroySurface(surf);
+            }
+            if (it != g_text_cache.end()) {
+                it->second.used = g_text_frame;
+                SDL_SetTextureAlphaMod(it->second.texture, c.a);  // fading text shares one image
+                // Centred on the line the pixel font would have used, which is 8 * scale tall.
+                const SDL_FRect dst{x, y + (8.0f * scale - it->second.h) * 0.5f, it->second.w, it->second.h};
+                SDL_RenderTexture(ren, it->second.texture, nullptr, &dst);
+                return;
+            }
+        }
+    }
+#endif
     set_color(ren, c);
     SDL_SetRenderScale(ren, scale * g_density, scale * g_density);
     SDL_RenderDebugText(ren, x / scale, y / scale, buf);
@@ -150,6 +250,13 @@ void text(SDL_Renderer* ren, float x, float y, float scale, SDL_Color c, const c
 }
 
 float text_width(const char* str, float scale) {
+#ifdef KID_TTF
+    if (g_font && str[0])
+        if (TTF_Font* f = font_for(scale)) {
+            int w = 0, h = 0;
+            if (TTF_GetStringSize(f, str, 0, &w, &h)) return static_cast<float>(w) / g_density;
+        }
+#endif
     return static_cast<float>(std::strlen(str)) * SDL_DEBUG_TEXT_FONT_CHARACTER_SIZE * scale;
 }
 
