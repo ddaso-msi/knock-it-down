@@ -619,6 +619,9 @@ int main(int argc, char** argv) {
     }
 
     app.level.reset();
+    // Everything that holds SDL objects lets go of them now, while SDL is still running: SDL_Quit
+    // frees the audio stream itself, and closing it again afterwards (from App's destructor) crashed.
+    app.audio.close();
     close_font();
     SDL_DestroyRenderer(renderer);
     SDL_DestroyWindow(window);
